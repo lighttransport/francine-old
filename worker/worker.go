@@ -27,6 +27,7 @@ type config struct {
 }
 
 func getConfigFromEtcd() (*config, error) {
+	fmt.Println("[WORKER] etcd host: " + etcdHost)
 	resp, err := http.Get(etcdHost + "/v2/keys/redis-server")
 	if err != nil {
 		return nil, err
