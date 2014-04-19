@@ -1,12 +1,14 @@
 #!/bin/sh
 
+version=$1
+
 cd tmp
 
 cp -R worker workspace/src
 
 # copy LTE binary
-cp lte/lte_linux_x64.1.1.2.tar.bz2 .
-tar xvf lte_linux_x64.1.1.2.tar.bz2
+cp lte/lte_linux_x64.${version}.tar.bz2 .
+tar xvf lte_linux_x64.${version}.tar.bz2
 cp lte_linux_x64/lte docker_dist
 
 # build and copy worker
