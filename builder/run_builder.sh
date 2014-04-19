@@ -12,3 +12,7 @@ sudo -E cp dockerfile_internal $ABS_DIR/docker_dist/Dockerfile
 cd $ABS_DIR/docker_dist; sudo docker build -t lighttransport/lte_bin .
 
 cd $ABS_DIR; sudo -E rm -rf $ABS_DIR/docker_dist
+
+CONTAINER_ID=`sudo docker run -d lighttransport/lte_bin ls`
+
+sudo -E docker export $CONTAINER_ID | gzip -c > $ABS_DIR/lighttransport-lte_bin.tar.gz

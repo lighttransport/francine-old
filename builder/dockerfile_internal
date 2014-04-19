@@ -3,6 +3,8 @@ MAINTAINER Syoyo Fujita(syoyo@lighttransport.com)
 
 ADD libdl.so.2 /lib64/
 ADD librt.so.1 /lib64/
+ADD libc.so.6 /lib64/
+ADD libpthread.so.0 /lib64/
 ADD lte /bin/lte
 ADD worker /bin/worker
 ADD scene /home/default/scene

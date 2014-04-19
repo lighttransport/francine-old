@@ -18,6 +18,8 @@ cp workspace/src/worker/worker docker_dist
 # copy dependencies
 cp /lib64/libdl.so.2 docker_dist
 cp /lib64/librt.so.1 docker_dist
+cp /lib64/libc.so.6  docker_dist
+cp /lib64/libpthread.so.0 docker_dist
 
 # generate dummy directories
 mkdir docker_dist/shader
