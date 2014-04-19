@@ -45,14 +45,14 @@ func getConfigFromEtcd() (*config, error) {
 	return &config, nil
 }
 
-func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redisPort string) {
+func kickRenderer(msgBytes string, redisPool *redis.Pool, redisHost string, redisPort string) {
 	var msg struct {
 		SessionId string `json:"session_id"`
 		ShaderId  string `json:"shader_id"`
 		Code      string `json:"code"`
 	}
 
-	json.Unmarshal(msgBytes, &msg)
+	json.Unmarshal([]byte(msgBytes), &msg)
 
 	exeDir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
 	writtenDir := exeDir + "/shaders/" + msg.ShaderId
@@ -150,7 +150,7 @@ func main() {
 		redisConn := redisPool.Get()
 
 		if resp, err := redisConn.Do("BLPOP", "render-q", 1); err == nil {
-			go kickRenderer(resp.([]byte), redisPool, redisHost, redisPort)
+			go kickRenderer(resp.(string), redisPool, redisHost, redisPort)
 		}
 
 		redisConn.Close()
