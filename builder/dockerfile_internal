@@ -9,3 +9,4 @@ ADD lte /bin/lte
 ADD worker /bin/worker
 ADD scene /home/default/scene
 ADD shader /home/default/shader
+ENV LD_LIBRARY_PATH /lib64
