@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	etcdHost     = "http://127.17.42.1:4001"
+	etcdHost     = "http://127.0.0.1:4001"
 	ltePath      = "/bin/lte"
 	redisMaxIdle = 5
 	lteAckTtl    = 3600 // one hour
@@ -45,19 +45,19 @@ func getConfigFromEtcd() (*config, error) {
 	return &config, nil
 }
 
-func kickRenderer(msgBytes string, redisPool *redis.Pool, redisHost string, redisPort string) {
+func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redisPort string) {
 	var msg struct {
 		SessionId string `json:"session_id"`
 		ShaderId  string `json:"shader_id"`
 		Code      string `json:"code"`
 	}
 
-	json.Unmarshal([]byte(msgBytes), &msg)
+	json.Unmarshal(msgBytes, &msg)
 
 	exeDir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
 	writtenDir := exeDir + "/shaders/" + msg.ShaderId
 
-	if err := os.MkdirAll(writtenDir, 755); err != nil {
+	if err := os.MkdirAll(writtenDir, 0755); err != nil {
 		fmt.Println(err.Error())
 		return
 	}
@@ -75,7 +75,7 @@ func kickRenderer(msgBytes string, redisPool *redis.Pool, redisHost string, redi
 	linkCheckCmd := exec.Command(ltePath, "--linkcheck", "--session="+msg.SessionId,
 		"--resource_basepath="+writtenDir, "-c", "scene/teapot_redis.json")
 	var linkCheckOutput bytes.Buffer
-	linkCheckCmd.Stdout = &linkCheckOutput
+	linkCheckCmd.Stderr = &linkCheckOutput
 
 	if err := linkCheckCmd.Run(); err != nil {
 		if _, ok := err.(*exec.ExitError); ok {
@@ -93,10 +93,15 @@ func kickRenderer(msgBytes string, redisPool *redis.Pool, redisHost string, redi
 		"--redis_host="+redisHost, "--redis_port="+redisPort,
 		"scene/teapot_redis.json")
 	var rendererStderr bytes.Buffer
+	var rendererStdout bytes.Buffer
+	rendererCmd.Stdout = &rendererStdout
 	rendererCmd.Stderr = &rendererStderr
 
 	rendererErr := rendererCmd.Run()
 
+	if rendererStdout.Len() > 0 {
+		fmt.Println("lte:stdout: " + rendererStdout.String())
+	}
 	if rendererStderr.Len() > 0 {
 		fmt.Println("lte:stderr: " + rendererStderr.String())
 	}
@@ -149,8 +154,16 @@ func main() {
 	for {
 		redisConn := redisPool.Get()
 
-		if resp, err := redisConn.Do("BLPOP", "render-q", 1); err == nil {
-			go kickRenderer(resp.(string), redisPool, redisHost, redisPort)
+		resp, err := redisConn.Do("BLPOP", "render-q", 1)
+
+		if resp != nil {
+			go kickRenderer(resp.([]interface{})[1].([]byte), redisPool, redisHost, redisPort)
+		}
+
+		if err != nil {
+			fmt.Println(err.Error());
+			redisConn.Close()
+			os.Exit(1)
 		}
 
 		redisConn.Close()
