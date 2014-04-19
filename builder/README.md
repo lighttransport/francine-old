@@ -1,6 +1,6 @@
 # Light Transport Engine Docker Container Builder
 ## Howto
 
-    LTE_DIR="/path/to/lte/distribution.tar.bz2"
+    LTE_DIR="/path/to/lte" # lte_linux_x64.1.1.2.tar.bz2 inside
     ./build_builder.sh # builds lighttransport/lte_builder
     ./run_builder.sh # builds lighttransport/lte_bin
