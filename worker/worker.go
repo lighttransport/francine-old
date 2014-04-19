@@ -13,8 +13,9 @@ import (
 	"strings"
 )
 
+var etcdHost string
+
 const (
-	etcdHost     = "http://127.0.0.1:4001"
 	ltePath      = "/bin/lte"
 	redisMaxIdle = 5
 	lteAckTtl    = 3600 // one hour
@@ -26,7 +27,7 @@ type config struct {
 	} `json:"node"`
 }
 
-func getConfigFromEtcd() (*config, error) {
+func getConfigFromEtcd(etcdHost string) (*config, error) {
 	fmt.Println("[WORKER] etcd host: " + etcdHost)
 	resp, err := http.Get(etcdHost + "/v2/keys/redis-server")
 	if err != nil {
@@ -135,7 +136,14 @@ func sendLteAck(data map[string]string, sessionId string, redisPool *redis.Pool)
 }
 
 func main() {
-	config, err := getConfigFromEtcd()
+	etcdHost := os.Getenv("ETCD_HOST")
+
+	if etcdHost == "" {
+		fmt.Println("please set ETCD_HOST")
+		os.Exit(1)
+	}
+
+	config, err := getConfigFromEtcd(etcdHost)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
