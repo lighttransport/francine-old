@@ -1,4 +1,4 @@
 # Francine
 
-renderer backend for massive server environemnt.
+Renderer backend for massive server environment.
 
