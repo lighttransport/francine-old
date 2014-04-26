@@ -1,0 +1,17 @@
+#cloud-config
+hostname: <hostname>
+
+coreos:
+  etcd:
+    name: <hostname>
+    discovery: https://discovery.etcd.io/<token>
+    addr: $private_ipv4:4001
+    peer-addr: $private_ipv4:7001
+  units:
+    - name: etcd.service
+      command: start
+
+runcmd:
+  - [ sh, -xc, "curl -O `etcdctl get /worker-image`" ]
+  - [ sh, -xc, "docker import sudo - lighttransport/lte_bin < lighttransport-lte_bin.tar.gz" ]
+  - [ sh, -xc, "docker run -d -e ETCD_HOST=127.17.42.1:4001 lighttransport/lte_bin /bin/worker" ]

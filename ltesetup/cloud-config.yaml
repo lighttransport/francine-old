@@ -1,0 +1,12 @@
+#cloud-config
+hostname: lte-master
+
+coreos:
+  etcd:
+    name: lte-master
+    discovery: <token_url>
+    addr: $private_ipv4:4001
+    peer-addr: $private_ipv4:7001
+  units:
+    - name: etcd.service
+      command: start

@@ -22,5 +22,6 @@ ADD supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 RUN mkdir -p /var/log/supervisor
 
 ADD master.go /tmp/workspace/src/master/master.go
+ADD cloud-config.yaml /tmp/cloud-config.yaml
 
 RUN cd /tmp/workspace/src/master/ && go build && cp master /bin/master
