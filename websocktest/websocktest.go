@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	sceneFrames = 100 // [1, 100)
+	sceneFrameBegin = 0 // inclusive
+	sceneFrameEnd = 100 // exclusive
 	sceneFiles  = "/Users/peryaudo/Desktop/_scene/scene%05d.jpg"
+	//sceneFiles  = "/Volumes/SSD/camera/2013_07_timelapse/IMG_%04d.JPG"
 	enableFps   = true
 )
 
@@ -63,7 +65,7 @@ func websockHandler(ws *websocket.Conn) {
 	fmt.Fprintf(os.Stderr, "connection established\n")
 
 	var scenes [][]byte
-	for i := 0; i < sceneFrames; i++ {
+	for i := sceneFrameBegin; i < sceneFrameEnd; i++ {
 		content, err := ioutil.ReadFile(fmt.Sprintf(sceneFiles, i+1))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
@@ -98,5 +100,6 @@ func main() {
 
 	http.Handle("/test", websocket.Handler(websockHandler))
 	http.Handle("/", http.FileServer(http.Dir(".")))
+	fmt.Printf("running on 8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
