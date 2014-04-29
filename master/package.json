@@ -1,9 +1,24 @@
 {
-    "name": "lte"
+    "name": "node-sleditor"
   , "version": "0.0.1"
   , "private": true
   , "dependencies": {
-      "redis": "*"
+      "socket.io": ">=0.9.16"
+    , "redback": "*"
+    , "passport": "*"
+    , "passport-oauth": "*"
+    , "mongoose": "*"
+    , "connect": "*"
+    , "connect-redis": "*"
+    , "express": "*"
+    , "cookie": "*"
+    , "q": "*"
+    , "forever": "*"
     , "shelljs": "*"
+    , "redis": "*"
+    , "express-session": "*"
+    , "cookie-parser": "*"
+    , "body-parser": "*"
+    , "method-override": "*"
   }
 }

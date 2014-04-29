@@ -17,8 +17,13 @@ var assert = require('assert');
 
 // sesssion store
 //var sessionStore = new express.session.MemoryStore();
-var RedisStore = require('connect-redis')(express);
+var session_ = require('express-session')
+var RedisStore = require('connect-redis')(session_);
 var sessionStore = new RedisStore();
+
+var cookieParser = require('cookie-parser')
+var bodyParser = require('body-parser')
+var methodOverride = require('method-override')
 
 // Config
 var port        = 7000;
@@ -35,7 +40,7 @@ var sessionToSocketTable = {};
 
 console.log('redisoPort:' + redisPort)
 
-app.configure(function () {
+//app.configure(function () {
   app.set('port', process.env.PORT || port);
   app.set('secretKey', 'lte2014shader_koku53surikag1');
   app.set('cookieSessionKey', 'sid');
@@ -46,14 +51,14 @@ app.configure(function () {
   app.use("/manual/js", express.static(__dirname + '/manual/js'));
   app.use("/manual/css", express.static(__dirname + '/manual/css'));
 
-  app.use(express.cookieParser(app.get('secretKey')));
-  app.use(express.session({key: app.get('cookieSessionKey'),
+  app.use(cookieParser(app.get('secretKey')));
+  app.use(session_({key: app.get('cookieSessionKey'),
                            store : sessionStore,
                            cookie : { maxAge: 3600 * 1000} // 1 hour
                           }));
-  app.use(express.bodyParser());
-  app.use(express.methodOverride());
-});
+  app.use(bodyParser());
+  app.use(methodOverride());
+//});
 
 app.get('/', function(req, res) {
   console.log('req:sessionID:' + req.sessionID);
