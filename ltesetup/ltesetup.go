@@ -1,14 +1,16 @@
 package main
 
 import (
+	"code.google.com/p/goauth2/oauth"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"os"
-	"os/exec"
-	"log"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -149,7 +151,6 @@ func CreateMaster(instance string) error {
 	}
 	defer ioutil.WriteFile("cloud-config.yaml", prev, 0644)
 
-
 	if err = AddInstance(&InstConfig{
 		name:        instance,
 		zone:        "us-central1-a",
@@ -161,7 +162,7 @@ func CreateMaster(instance string) error {
 	}
 
 	for i := 0; i < 5; i++ {
-		if err = SendCommand(instance, "etcdctl set /token-url " + token); err != nil {
+		if err = SendCommand(instance, "etcdctl set /token-url "+token); err != nil {
 			fmt.Println("failed, try again")
 		}
 	}
@@ -177,11 +178,47 @@ func CreateMaster(instance string) error {
 	return nil
 }
 
-func SendCreateWorker(masterInstance string) error { 
+func SendCreateWorker(masterInstance string) error {
 	if err := SendCommand(masterInstance,
 		"sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush worker-q create"); err != nil {
 		return err
 	}
+	return nil
+}
+
+func SendOAuthToken(masterInstance, clientId, clientSecret string) error {
+	config := &oauth.Config{
+		ClientId:     clientId,
+		ClientSecret: clientSecret,
+		RedirectURL:  "urn:ietf:wg:oauth:2.0:oob",
+		Scope:        "https://www.googleapis.com/auth/compute",
+		AuthURL:      "https://accounts.google.com/o/oauth2/auth",
+		TokenURL:     "https://accounts.google.com/o/oauth2/token"}
+
+	fmt.Printf("Visit the following URL, then type the code: %s\n", config.AuthCodeURL(""))
+	fmt.Printf("code: ")
+
+	var code string
+	fmt.Scanf("%s", &code)
+
+	transport := &oauth.Transport{Config: config}
+	token, err := transport.Exchange(code)
+	if err != nil {
+		return err
+	}
+
+	transport.Token = token
+
+	jsoned, err := json.Marshal(transport)
+	if err != nil {
+		return err
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(jsoned)
+	if err = SendCommand(masterInstance, "etcdctl set /gce-oauth-token "+encoded); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -193,9 +230,10 @@ func main() {
 	delete_master
 	create_worker
 	update_images
+	auth <client id> <client secret>
 `)
-	// create_network
-	// delete_worker
+		// create_network
+		// delete_worker
 
 		flag.PrintDefaults()
 	}
@@ -212,7 +250,7 @@ func main() {
 	var err error
 	switch commandName {
 	/*case "create_network":
-		err = CreateNetwork("lte-cluster")*/
+	err = CreateNetwork("lte-cluster")*/
 	case "create_master":
 		err = CreateMaster("lte-master")
 	case "delete_master":
@@ -221,12 +259,19 @@ func main() {
 		err = UpdateImages("lte-master")
 	case "create_worker":
 		err = SendCreateWorker("lte-master")
+	case "auth":
+		if flag.NArg() < 3 {
+			fmt.Fprintf(os.Stderr, "%s: too few arguments\n", os.Args[0])
+			flag.Usage()
+			os.Exit(1)
+		}
+		err = SendOAuthToken("lte-master", flag.Args()[1], flag.Args()[2])
 	default:
-		log.Fatalf("%s: unknown command %s\n", os.Args[0], commandName)
+		fmt.Fprintf(os.Stderr, "%s: unknown command %s\n", os.Args[0], commandName)
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "%s: %s\n", os.Args[0], err.Error())
 	}
 
 }

@@ -11,7 +11,8 @@ IMAGE_ID=`sudo -E docker import - < lighttransport-lte_master.tar.gz`
 rm lighttransport-lte_master.tar.gz
 echo $IMAGE_ID > master_image_id
 
-sudo -E docker run -d -p 6379:6379 -p 80:80 -p 8080:8080 -v `pwd`/lte_bin:/tmp/lte_bin $IMAGE_ID /usr/bin/supervisord > master_id
+mkdir -p supervisorlog
+sudo -E docker run -d -p 6379:6379 -p 80:7000 -p 8080:8080 -e "ETCD_HOST=172.17.42.1:4001" -v `pwd`/lte_bin:/tmp/lte_bin -v `pwd`/supervisorlog:/var/log/supervisor $IMAGE_ID /usr/bin/supervisord > master_id
 
 etcdctl set /redis-server $PRIVATE_IPV4:6379
 etcdctl set /worker-image http://$PRIVATE_IPV4:8080/lighttransport-lte_bin.tar.gz

@@ -4,7 +4,7 @@ hostname: <hostname>
 coreos:
   etcd:
     name: <hostname>
-    discovery: https://discovery.etcd.io/<token>
+    discovery: <token_url>
     addr: $private_ipv4:4001
     peer-addr: $private_ipv4:7001
   units:

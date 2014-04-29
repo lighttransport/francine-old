@@ -142,7 +142,7 @@ io.configure(function(){
               handshakeData.shaderID  = shaderID;
               handshakeData.sessionID = sessionID;
               handshakeData.sessionStore = sessionStore;
-              handshakeData.session = new express.session.Session(handshakeData, session);
+              handshakeData.session = new session_.Session(handshakeData, session);
 
               return callback(null, true); // OK
             });

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Light transport shader editor online</title>
+<link href='http://fonts.googleapis.com/css?family=Inconsolata:400,700' rel='stylesheet' type='text/css'>
+<style type="text/css" media="screen">
+    #editor { 
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+    }
+    .error {
+        position: absolute;
+        z-index: 4;
+        background: #662222;
+    }
+    .warning {
+        position: absolute;
+        z-index: 4;
+        background: #555522;
+    }
+    .docline {
+        color: #666666;
+        font-size: 14px;
+    } 
+    .docline_small {
+        color: #666666;
+        font-size: 12px;
+    } 
+</style>
+</head>
+<body style="background: #333333" onload="init()">
+
+
+<div id="editor" style="left: 300px; width: 680px; height: 400px"></div>
+
+<div id="status-window" style="left: 300px; width: 680px; top: 380px; height: 500px"></div>
+
+<canvas id="lte_render_window" style="position:absolute; left: 24px; top: 5px; width: 256px; height: 256px;" width=256 height=256></canvas>
+
+<div id="doc" style="position:absolute; left: 26px; width: 250px; top: 300px; height: 100px">
+<p class="docline_small">Your session: <a href="/" id="session_link">0</a>
+<p class="docline"><a href="manual/index.html" target="_blank">language syntax</a></p><br><p class="docline"><b>Update:</b></p>
+<p class="docline_small">
+Mar 26, 2014 : Show link error. <br>
+Mar 22, 2014 : Improve stability. <br>
+Mar 18, 2014 : Support of session. Improve stability. <br>
+Mar 09, 2014 : Initial support of session. <br>
+Feb 15, 2013 : Add noise function: snoise2d, snoise3d, snoise4d. <br>
+Jan 17, 2013 : Add vec2 and vec3 type. <br>
+Jan 17, 2013 : Add vector version of mix(). <br>
+Jan 12, 2013 : Do link check.  <br>
+Jan 12, 2013 : Disable system header include.
+</p></div>
+
+<script type="text/javascript" src="javascripts/jquery.min.js"></script>
+<script type="text/javascript" src="javascripts/bootstrap.js"></script>
+<script src="javascripts/ace.js" type="text/javascript" charset="utf-8"></script>
+<link href="css/bootstrap.css" rel="stylesheet">
+<script src="socket.io/socket.io.js"></script>
+
+<script>
+  var lastEditedMsec = (new Date).getTime();
+  var editorChanged = false;
+  var hasChanged = false;
+
+  ////
+  //// Socket.io
+  ////
+  var socket = io.connect('http://' + location.host + ':' + location.port + '/', {resource: 'socket.io', 'connect timeout':3000});
+
+  socket.on("connect", function() {
+    console.log("connect");
+  });
+
+  socket.on("disconnect", function() {
+    console.log("disconnect");
+  });
+
+  //
+  // ACE editor
+  //
+  var editor = ace.edit("editor");
+  //editor.setTheme("ace/theme/twilight");
+  editor.setTheme("ace/theme/tomorrow_night_bright");
+  editor.setOption("maxLines", 20);
+  editor.setOption("minLines", 20);
+  //editor.setAutoScrollEditorIntoView();
+  document.getElementById('editor').style.fontSize='16px';
+  document.getElementById('editor').style.fontFamily="'Inconsolata', sans-serif"
+  editor.getSession().setValue("");
+  editor.getSession().setMode("ace/mode/glsl");
+  editor.getSession().setTabSize(2)
+  editor.getSession().setUseSoftTabs(true);
+  editor.getSession().setUseWrapMode(true);
+
+  editor.getSession().on('change', function(e) {
+    hasChanged = true;
+    lastEditedMsec = (new Date).getTime();
+
+  });
+  var markers = []
+
+  var statusWindow = ace.edit("status-window");
+  statusWindow.setTheme("ace/theme/twilight");
+  statusWindow.setOption("maxLines", 8);
+  statusWindow.setOption("minLines", 8);
+  statusWindow.renderer.setShowGutter(false);
+  //editor.setAutoScrollEditorIntoView();
+  document.getElementById('status-window').style.fontSize='16px';
+  document.getElementById('status-window').style.fontFamily="'Inconsolata', sans-serif"
+  statusWindow.getSession().setValue("");
+  statusWindow.getSession().setMode("ace/mode/c_cpp");
+  statusWindow.getSession().setTabSize(2)
+  statusWindow.getSession().setUseSoftTabs(true);
+  statusWindow.getSession().setUseWrapMode(true);
+  statusWindow.setReadOnly(true);
+
+  document.getElementById('lte_render_window').style.position='absolute';
+  document.getElementById('lte_render_window').style.width='256px';
+  document.getElementById('lte_render_window').style.height='256px';
+
+
+  socket.on('compile_result', function(infos) {
+    console.log('compile_result');
+    //console.log('result:', infos);
+
+    // remove markers
+    for (var i = 0; i < markers.length; i++) {
+      editor.getSession().removeMarker(markers[i]);
+    }
+    markers = []
+
+
+    var range = ace.require('ace/range').Range;
+    
+    var results = infos['results']
+    var annotations = []
+
+    if (results && results.length == 0 && infos['stderr'].length == 0) {
+      statusWindow.getSession().setValue("OK")
+    } else {
+      // Show compile log to statusWindow.
+      statusWindow.getSession().setValue(infos['stderr'])
+    }
+
+    for (var i = 0; i < results.length; i++) {
+
+      var ret = results[i];
+
+      if (ret['range']) {
+        var rowStart = ret['range'][0]-1
+        var columnStart = ret['range'][1]-1
+        var rowEnd = ret['range'][2]-1
+        var columnEnd = ret['range'][3]-1
+
+        var annotation = {
+                      row: rowStart,
+                      column: columnStart,
+                      text: ret['message'],
+                      type: ret['type']
+                    }
+        annotations.push(annotation);
+
+        var r = new range(rowStart, columnStart, rowEnd, columnEnd);
+        var marker = editor.getSession().addMarker(r, ret['type'], "text");
+        markers.push(marker);
+
+      } else if (ret['line']) {
+        var rowStart = ret['line'][0]-1
+        var columnStart = 0
+
+        var annotation = {
+                      row: rowStart,
+                      column: columnStart,
+                      text: ret['message'],
+                      type: ret['type']
+                    }
+
+        annotations.push(annotation);
+      
+        var r = new range(rowStart, 0, rowStart+1, 0);
+        var marker = editor.getSession().addMarker(r, ret['type'], "line");
+        markers.push(marker);
+      } 
+
+
+    }
+
+    editor.getSession().setAnnotations(annotations);
+  });
+
+  function idle() {
+    var msec = (new Date).getTime();
+
+    if (hasChanged && ((msec - lastEditedMsec) > 300)) {
+      //console.log(editor.getValue());
+      hasChanged = false;
+      lastEditedMsec = msec;
+
+      msg = { 'code' : editor.getValue()
+            }
+
+      socket.emit('msg', msg);
+    }
+
+    window.setTimeout("idle()", 300);
+  }
+
+  socket.on("init_code", function(data) {
+    console.log('init_code');
+    editor.getSession().setValue(data);
+  });
+
+  socket.on("session_notify", function(data) {
+    console.log('session_notify');
+    document.getElementById('session_link').href = data;
+    document.getElementById('session_link').innerHTML = data;
+    //editor.getSession().setValue(data);
+  });
+
+  socket.on("render_data", function(data) {
+    console.log("render_data");
+
+    var canvas = document.getElementById('lte_render_window');
+    var ctx = canvas.getContext('2d');
+    var canvasWidth  = canvas.width;
+    var canvasHeight = canvas.height;
+    //console.log("w = " + canvasWidth);
+    //console.log("h = " + canvasHeight);
+
+    var img = new Image();
+    img.onload = function() { ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight); };
+    img.src = data; // Assume data is provided as DataURI format
+  });
+
+  function init() {
+    // 
+  }
+
+  window.setTimeout("idle()", 300);
+
+  
+</script>
+</body>
+</html>
