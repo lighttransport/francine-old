@@ -36,6 +36,7 @@ func AddInstance(config *InstConfig) error {
 		`--service_account_scopes=https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/compute,https://www.googleapis.com/auth/devstorage.full_control`,
 		`--image=https://www.googleapis.com/compute/v1/projects/gcp-samples/global/images/coreos-v282-0-0`,
 		`--metadata_from_file=user-data:`+config.cloudConfig,
+		`--boot_disk_size_gb=15`,
 		`--persistent_boot_disk=true`,
 		`--auto_delete_boot_disk=true`)
 
@@ -76,41 +77,6 @@ func CheckFiles(files []string) error {
 	return nil
 }
 
-func UpdateImages(instance string) error {
-	reqs := []string{
-		"../master/lighttransport-lte_master.tar.gz",
-		"../builder/lighttransport-lte_bin.tar.gz",
-		"setup_master.sh"}
-	if err := CheckFiles(reqs); err != nil {
-		return err
-	}
-
-	if err := SendFile(instance,
-		"../master/lighttransport-lte_master.tar.gz",
-		"lighttransport-lte_master.tar.gz"); err != nil {
-		return err
-	}
-	if err := SendCommand(instance, "mkdir -p lte_bin"); err != nil {
-		return err
-	}
-	if err := SendFile(instance,
-		"../builder/lighttransport-lte_bin.tar.gz",
-		"lte_bin/lighttransport-lte_bin.tar.gz"); err != nil {
-		return err
-	}
-	if err := SendFile(instance, "setup_master.sh", "setup_master.sh"); err != nil {
-		return err
-	}
-	if err := SendCommand(instance, "chmod +x setup_master.sh"); err != nil {
-		return err
-	}
-	if err := SendCommand(instance, "./setup_master.sh"); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func GetToken() (string, error) {
 	resp, err := http.Get("https://discovery.etcd.io/new")
 	if err != nil {
@@ -125,11 +91,7 @@ func GetToken() (string, error) {
 }
 
 func CreateMaster(instance string) error {
-	reqs := []string{
-		"../master/lighttransport-lte_master.tar.gz",
-		"../builder/lighttransport-lte_bin.tar.gz",
-		"cloud-config.yaml",
-		"setup_master.sh"}
+	reqs := []string{"cloud-config.yaml"}
 	var err error
 	if err = CheckFiles(reqs); err != nil {
 		return err
@@ -158,20 +120,6 @@ func CreateMaster(instance string) error {
 		network:     "lte-cluster",
 		ipType:      "ephemeral",
 		cloudConfig: "cloud-config.yaml"}); err != nil {
-		return err
-	}
-
-	for i := 0; i < 5; i++ {
-		if err = SendCommand(instance, "etcdctl set /token-url "+token); err != nil {
-			fmt.Println("failed, try again")
-		}
-	}
-
-	if err != nil {
-		return err
-	}
-
-	if err = UpdateImages(instance); err != nil {
 		return err
 	}
 
@@ -229,9 +177,24 @@ func main() {
 	create_master
 	delete_master
 	create_worker
-	update_images
 	auth <client id> <client secret>
+
+How to Setup:
+	./ltesetup create_master
+	gcutil ssh --ssh_arg "-L 5000:localhost:5000" lte-master
+
+	cd ../builder
+	./build_builder.sh
+	./run_builder.sh
+
+	cd ../master
+	./build.sh
+
+	cd ../ltesetup
+	./ltesetup auth <client id> <client secret>
+	./ltesetup create_worker
 `)
+		// update_images
 		// create_network
 		// delete_worker
 
@@ -255,8 +218,8 @@ func main() {
 		err = CreateMaster("lte-master")
 	case "delete_master":
 		err = DeleteInstance("lte-master")
-	case "update_images":
-		err = UpdateImages("lte-master")
+	/*case "update_images":
+		err = UpdateImages("lte-master")*/
 	case "create_worker":
 		err = SendCreateWorker("lte-master")
 	case "auth":

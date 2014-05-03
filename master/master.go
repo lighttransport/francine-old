@@ -15,20 +15,11 @@ import (
 	"time"
 )
 
-// instanceName =
-
 const (
 	redisMaxIdle = 5
 )
 
-type config struct {
-	RedisServer   string
-	TokenUrl      string
-	GceOAuthToken string
-}
-
 func getEtcdValue(etcdHost, key string) (string, error) {
-	fmt.Println("[WORKER] etcd host: " + etcdHost)
 	resp, err := http.Get("http://" + etcdHost + "/v2/keys/" + key)
 	if err != nil {
 		return "", err
@@ -48,22 +39,9 @@ func getEtcdValue(etcdHost, key string) (string, error) {
 
 	json.Unmarshal(body, &parsed)
 
-	return parsed.Node.Value, nil
-}
+	fmt.Println("[WORKER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
 
-func getConfigFromEtcd(etcdHost string) (*config, error) {
-	var err error
-	var c config
-	if c.RedisServer, err = getEtcdValue(etcdHost, "redis-server"); err != nil {
-		return nil, err
-	}
-	if c.TokenUrl, err = getEtcdValue(etcdHost, "token-url"); err != nil {
-		return nil, err
-	}
-	if c.GceOAuthToken, err = getEtcdValue(etcdHost, "gce-oauth-token"); err != nil {
-		return nil, err
-	}
-	return &c, nil
+	return parsed.Node.Value, nil
 }
 
 func postRequest(url string, data interface{}, client *http.Client) (string, error) {
@@ -85,12 +63,16 @@ func postRequest(url string, data interface{}, client *http.Client) (string, err
 }
 
 func createWorkerInstance(etcdHost string) {
-	config, err := getConfigFromEtcd(etcdHost)
+	tokenUrl, err := getEtcdValue(etcdHost, "token-url")
+	if err != nil {
+		log.Fatal(err)
+	}
+	gceOAuthToken, err := getEtcdValue(etcdHost, "gce-oauth-token")
 	if err != nil {
 		log.Fatal(err)
 	}
 	instanceName := "lte-worker-" + time.Now().Format("20060102150405")
-	zone := "us-central1-b"
+	zone := "us-central1-a"
 	machineType := "n1-standard-1"
 
 	var cloudConfig string
@@ -101,9 +83,9 @@ func createWorkerInstance(etcdHost string) {
 	}
 
 	cloudConfig = strings.Replace(cloudConfig, "<hostname>", instanceName, -1)
-	cloudConfig = strings.Replace(cloudConfig, "<token_url>", config.TokenUrl, -1)
+	cloudConfig = strings.Replace(cloudConfig, "<token_url>", tokenUrl, -1)
 
-	decoded, err := base64.StdEncoding.DecodeString(config.GceOAuthToken)
+	decoded, err := base64.StdEncoding.DecodeString(gceOAuthToken)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -122,10 +104,14 @@ func createWorkerInstance(etcdHost string) {
 		fmt.Println(res)
 	}
 
+	fmt.Println("[WORKER] waiting 60s for disk preparing...")
+	time.Sleep(60 * time.Second)
+
 	req := map[string]interface{}{
 		"disks": []interface{}{map[string]interface{}{
 			"type":       "PERSISTENT",
 			"boot":       true,
+			"autoDelete": true,
 			"mode":       "READ_WRITE",
 			"deviceName": instanceName,
 			"zone":       "https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/" + zone,
@@ -168,20 +154,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	config, err := getConfigFromEtcd(etcdHost)
-	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
-
-	http.Handle("/", http.FileServer(http.Dir("/tmp/lte_bin")))
-	go func() {
-		http.ListenAndServe(":8080", nil)
-	}()
-
 	redisPool := redis.NewPool(
 		func() (redis.Conn, error) {
-			return redis.Dial("tcp", config.RedisServer)
+			redisServer, err := getEtcdValue(etcdHost, "redis-server")
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			return redis.Dial("tcp", redisServer)
 		}, redisMaxIdle)
 	defer redisPool.Close()
 
