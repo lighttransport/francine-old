@@ -154,7 +154,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	redisPool := redis.NewPool(
+	if len(os.Args) > 1 && os.Args[1] == "create" {
+		createWorkerInstance(etcdHost)
+		os.Exit(0)
+	}
+
+	/*redisPool := redis.NewPool(
 		func() (redis.Conn, error) {
 			redisServer, err := getEtcdValue(etcdHost, "redis-server")
 			if err != nil {
@@ -177,10 +182,38 @@ func main() {
 
 		if err != nil {
 			redisConn.Close()
-			fmt.Println("failed, wait 30 seconds and retry...")
+			fmt.Printf("%s; failed, wait 30 seconds and retry...\n", err.Error())
 			time.Sleep(30 * time.Second)
 		}
 
 		redisConn.Close()
+	}*/
+
+	redisServer, err := getEtcdValue(etcdHost, "redis-server")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for {
+		redisConn, err := redis.Dial("tcp", redisServer)
+		if err != nil {
+			fmt.Printf("redis connection failed(%s), wait 30 seconds and retry...\n", err.Error())
+			time.Sleep(30 * time.Second)
+			continue
+		}
+		defer redisConn.Close()
+
+		resp, err := redisConn.Do("BLPOP", "worker-q", 1)
+		if resp != nil {
+			switch string(resp.([]interface{})[1].([]byte)) {
+			case "create":
+				go createWorkerInstance(etcdHost)
+			}
+		}
+
+		if err != nil {
+			log.Fatal(err)
+		}
+		break
 	}
 }
