@@ -13,3 +13,4 @@ ENV GOPATH /tmp/workspace
 RUN go get github.com/garyburd/redigo/redis
 
 ADD run_internal.sh /tmp/run_internal.sh
+ADD scene /tmp/scene

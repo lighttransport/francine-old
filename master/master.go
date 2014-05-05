@@ -154,12 +154,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if len(os.Args) > 1 && os.Args[1] == "create" {
+/*	if len(os.Args) > 1 && os.Args[1] == "create" {
 		createWorkerInstance(etcdHost)
 		os.Exit(0)
-	}
+	}*/
 
-	/*redisPool := redis.NewPool(
+	redisPool := redis.NewPool(
 		func() (redis.Conn, error) {
 			redisServer, err := getEtcdValue(etcdHost, "redis-server")
 			if err != nil {
@@ -187,9 +187,9 @@ func main() {
 		}
 
 		redisConn.Close()
-	}*/
+	}
 
-	redisServer, err := getEtcdValue(etcdHost, "redis-server")
+	/*redisServer, err := getEtcdValue(etcdHost, "redis-server")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -215,5 +215,5 @@ func main() {
 			log.Fatal(err)
 		}
 		break
-	}
+	}*/
 }

@@ -27,4 +27,4 @@ cp /lib64/libpthread.so.0 docker_dist
 mkdir docker_dist/shader
 echo "dummuy" > docker_dist/shader/dummy
 mkdir docker_dist/scene
-echo "dummuy" > docker_dist/scene/dummy
+cp -r /tmp/scene docker_dist/scene

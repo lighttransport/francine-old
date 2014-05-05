@@ -69,7 +69,7 @@ Jan 12, 2013 : Disable system header include.
   ////
   //// Socket.io
   ////
-  var socket = io.connect('http://' + location.host + ':' + location.port + '/', {resource: 'socket.io', 'connect timeout':3000});
+  var socket = io.connect('http://' + location.host + '/', {resource: 'socket.io', 'connect timeout':3000});
 
   socket.on("connect", function() {
     console.log("connect");

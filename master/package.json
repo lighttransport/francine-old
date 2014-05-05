@@ -9,16 +9,12 @@
     , "passport-oauth": "*"
     , "mongoose": "*"
     , "connect": "*"
-    , "connect-redis": "*"
-    , "express": "*"
+    , "connect-redis": "1.4.7"
+    , "express": "3.x"
     , "cookie": "*"
     , "q": "*"
     , "forever": "*"
     , "shelljs": "*"
     , "redis": "*"
-    , "express-session": "*"
-    , "cookie-parser": "*"
-    , "body-parser": "*"
-    , "method-override": "*"
   }
 }
