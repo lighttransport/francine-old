@@ -23,6 +23,6 @@ cd $ABS_DIR/docker_dist; sudo docker build -t lighttransport/lte_bin .
 
 cd $ABS_DIR; sudo -E rm -rf $ABS_DIR/docker_dist
 
-CONTAINER_ID=`sudo docker run -d lighttransport/lte_bin ls`
+sudo docker tag lighttransport/lte_bin localhost:5000/lte_bin
+sudo docker push localhost:5000/lte_bin
 
-sudo -E docker export $CONTAINER_ID | gzip -c > $ABS_DIR/lighttransport-lte_bin.tar.gz

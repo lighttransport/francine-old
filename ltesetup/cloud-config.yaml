@@ -10,3 +10,44 @@ coreos:
   units:
     - name: etcd.service
       command: start
+    - name: registry.service
+      command: start
+      content: |
+        [Unit]
+        Description=Docker Container Registry
+        After=docker.service
+        Requires=docker.service
+        [Service]
+        ExecStartPre=/usr/bin/mkdir -p /home/peryaudo/registry
+        ExecStart=/usr/bin/docker run -p 5000:5000 -v /home/peryaudo/registry:/tmp/registry registry
+
+        [Install]
+        WantedBy=multi-user.target
+    - name: ltemaster.service
+      command: start
+      content: |
+        [Unit]
+        Description=LTE Master Container
+        After=registry.service etcd.service redis.service
+        Requires=registry.service etcd.service redis.service
+        [Service]
+        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /token-url <token_url>; exit 0"
+        ExecStartPre=/usr/bin/docker pull 127.0.0.1:5000/lte_master
+        ExecStartPre=/usr/bin/mkdir -p /tmp/supervisorlog
+        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /redis-server $private_ipv4:6379; exit 0"
+        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /lte-bin-url $private_ipv4:5000/lte_bin; exit 0"
+        ExecStart=/usr/bin/docker run -p 7000:7000 -e ETCD_HOST=172.17.42.1:4001 -e REDIS_HOST=$private_ipv4 -v /tmp/supervisorlog:/var/log/supervisor 127.0.0.1:5000/lte_master /usr/bin/supervisord
+
+        [Install]
+        WantedBy=multi-user.target
+    - name: redis.service
+      command: start
+      content: |
+        [Unit]
+        Description=Redis
+
+        [Service]
+        ExecStart=/usr/bin/docker run -p 6379:6379 dockerfile/redis
+
+        [Install]
+        WantedBy=multi-user.target

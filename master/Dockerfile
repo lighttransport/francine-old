@@ -4,11 +4,14 @@ MAINTAINER peryaudo, peryaudo@gmail.com
 
 EXPOSE 6379 80
 
-RUN apt-get update && apt-get install -y redis-server supervisor wget git python-software-properties clang
+RUN apt-get update && apt-get install -y supervisor wget git python-software-properties xz-utils
 RUN sudo add-apt-repository ppa:chris-lea/node.js && sudo apt-get update && sudo apt-get install -y nodejs
 
 RUN cd /tmp && wget --no-check-certificate https://go.googlecode.com/files/go1.2.1.linux-amd64.tar.gz
 RUN cd /tmp && tar -C /usr/local -xzf go1.2.1.linux-amd64.tar.gz
+
+RUN cd /tmp && wget http://llvm.org/releases/3.4/clang+llvm-3.4-x86_64-linux-gnu-ubuntu-13.10.tar.xz
+RUN cd /tmp && tar -C /tmp -xJf clang+llvm-3.4-x86_64-linux-gnu-ubuntu-13.10.tar.xz && cp -r /tmp/clang+llvm-3.4-x86_64-linux-gnu-ubuntu-13.10/* /usr/local && rm -rf /tmp/clang+llvm-3.4-x86_64-linux-gnu-ubuntu-13.10
 
 ENV PATH /usr/local/go/bin:$PATH
 ENV GOPATH /tmp/workspace
@@ -33,3 +36,7 @@ ADD package.json /tmp/server/package.json
 RUN cd /tmp/server && npm config set registry http://registry.npmjs.org/ && npm install
 ADD server.js /tmp/server/server.js
 ADD index.html /tmp/server/index.html
+ADD shader.h /tmp/server/shader.h
+ADD procedural-noise.c /tmp/server/procedural-noise.c
+ADD light.h /tmp/server/light.h
+

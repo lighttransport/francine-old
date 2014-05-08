@@ -16,14 +16,9 @@ var redback = require('redback');
 var assert = require('assert');
 
 // sesssion store
-//var sessionStore = new express.session.MemoryStore();
-var session_ = require('express-session')
-var RedisStore = require('connect-redis')(session_);
-var sessionStore = new RedisStore();
-
-var cookieParser = require('cookie-parser')
-var bodyParser = require('body-parser')
-var methodOverride = require('method-override')
+var sessionStore = new express.session.MemoryStore();
+//var RedisStore = require('connect-redis')(express);
+//var sessionStore = new RedisStore();
 
 // Config
 var port        = 7000;
@@ -31,7 +26,8 @@ var port        = 7000;
 //var redisPort       = 16379; // gce
 var redisPort       = 6379; // local
 //var redisServerAddr = "172.17.0.78"; // redis in docker
-var redisServerAddr = "127.0.0.1"; // redis in local
+//var redisServerAddr = "127.0.0.1"; // redis in local
+var redisServerAddr = process.env.REDIS_HOST;
 
 var clang = 'clang';
 
@@ -40,7 +36,7 @@ var sessionToSocketTable = {};
 
 console.log('redisoPort:' + redisPort)
 
-//app.configure(function () {
+app.configure(function () {
   app.set('port', process.env.PORT || port);
   app.set('secretKey', 'lte2014shader_koku53surikag1');
   app.set('cookieSessionKey', 'sid');
@@ -51,14 +47,14 @@ console.log('redisoPort:' + redisPort)
   app.use("/manual/js", express.static(__dirname + '/manual/js'));
   app.use("/manual/css", express.static(__dirname + '/manual/css'));
 
-  app.use(cookieParser(app.get('secretKey')));
-  app.use(session_({key: app.get('cookieSessionKey'),
+  app.use(express.cookieParser(app.get('secretKey')));
+  app.use(express.session({key: app.get('cookieSessionKey'),
                            store : sessionStore,
                            cookie : { maxAge: 3600 * 1000} // 1 hour
                           }));
-  app.use(bodyParser());
-  app.use(methodOverride());
-//});
+  app.use(express.bodyParser());
+  app.use(express.methodOverride());
+});
 
 app.get('/', function(req, res) {
   console.log('req:sessionID:' + req.sessionID);
@@ -142,7 +138,7 @@ io.configure(function(){
               handshakeData.shaderID  = shaderID;
               handshakeData.sessionID = sessionID;
               handshakeData.sessionStore = sessionStore;
-              handshakeData.session = new session_.Session(handshakeData, session);
+              handshakeData.session = new express.session.Session(handshakeData, session);
 
               return callback(null, true); // OK
             });
@@ -424,7 +420,7 @@ io.sockets.on('connection', function (socket) {
     infos['results'] = []
     infos['stderr'] = ""
     
-    var c = spawn(clang, ["-c", "-I.", "-D__LTE_CLSHADER__", diag_opt, filepath])
+    var c = spawn(clang, ["-c", "-I/tmp/server", "-D__LTE_CLSHADER__", diag_opt, filepath])
 
     c.stdout.setEncoding('utf8');
     c.stdout.on('data', function (data) {
