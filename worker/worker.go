@@ -12,12 +12,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
-	ltePath      = "/bin/lte"
-	redisMaxIdle = 5
-	lteAckTtl    = 3600 // one hour
+	ltePath         = "/bin/lte"
+	redisMaxIdle    = 5
+	lteAckTtl       = 3600 // one hour
+	pingIntervalMin = 1    // minutes
 )
 
 func getEtcdValue(etcdHost, key string) (string, error) {
@@ -137,14 +139,29 @@ func sendLteAck(data map[string]string, sessionId string, redisPool *redis.Pool)
 		fmt.Println(err.Error())
 	}
 
-	fmt.Printf("[WORKER]lte-ack end: session:%s data: %+v\n", sessionId, data)
+	fmt.Printf("[WORKER]lte-ack end")
+}
+
+func sendPings(workerName string, redisPool *redis.Pool) {
+	conn := redisPool.Get()
+	defer conn.Close()
+
+	for {
+		conn.Do("RPUSH", "cmd:lte-master", "ping:"+workerName)
+		time.Sleep(pingIntervalMin * time.Minute)
+	}
 }
 
 func main() {
 	etcdHost := os.Getenv("ETCD_HOST")
-
 	if etcdHost == "" {
 		fmt.Println("please set ETCD_HOST")
+		os.Exit(1)
+	}
+
+	workerName := os.Getenv("WORKER_NAME")
+	if workerName == "" {
+		fmt.Println("please set WORKER_NAME")
 		os.Exit(1)
 	}
 
@@ -162,13 +179,32 @@ func main() {
 		}, redisMaxIdle)
 	defer redisPool.Close()
 
+	go sendPings(workerName, redisPool)
+
+	cmdQueueName := "cmd:" + workerName
+
 	for {
 		redisConn := redisPool.Get()
 
-		resp, err := redisConn.Do("BLPOP", "render-q", 1)
+		resp, err := redisConn.Do("BLPOP", "render-q", cmdQueueName, 1)
 
 		if resp != nil {
-			go kickRenderer(resp.([]interface{})[1].([]byte), redisPool, redisHost, redisPort)
+			listName := string(resp.([]interface{})[0].([]byte))
+			popped := resp.([]interface{})[1].([]byte)
+
+			switch listName {
+			case "render-q":
+				go kickRenderer(popped, redisPool, redisHost, redisPort)
+			case cmdQueueName:
+				switch string(popped) {
+				case "stop":
+					redisConn.Close()
+					os.Exit(0)
+				case "restart":
+					redisConn.Close()
+					os.Exit(1)
+				}
+			}
 		}
 
 		if err != nil {

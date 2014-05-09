@@ -128,11 +128,21 @@ func CreateMaster(instance string) error {
 }
 
 func SendCreateWorker(masterInstance string) error {
-	if err := SendCommand(masterInstance,
-		"sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush worker-q create"); err != nil {
-		return err
-	}
-	return nil
+	return SendCommand(masterInstance,
+		"sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush cmd:lte-master create")
+}
+
+func RestartWorkers(masterInstance string) error {
+	return SendCommand(masterInstance,
+		"sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush cmd:lte-master restart_workers")
+}
+
+func RestartMaster(masterInstance string) error {
+	return SendCommand(masterInstance, "sudo systemctl restart ltemaster.service")
+}
+
+func RestartDemo(masterInstance string) error {
+	return SendCommand(masterInstance, "sudo systemctl restart ltedemo.service")
 }
 
 func UpdateImages(masterInstance string, imageName string) error {
@@ -219,6 +229,9 @@ func main() {
 	delete_master
 	create_worker
 	auth <client id> <client secret>
+	restart_workers
+	restart_master
+	restart_demo
 
 How to Setup:
 	./ltesetup create_master
@@ -227,7 +240,6 @@ How to Setup:
 	./ltesetup auth <client id> <client secret>
 	./ltesetup create_worker
 `)
-		// gcutil ssh --ssh_arg "-L 5000:localhost:5000" lte-master
 		// create_network
 		// delete_worker
 
@@ -266,6 +278,12 @@ How to Setup:
 			os.Exit(1)
 		}
 		err = SendOAuthToken("lte-master", flag.Args()[1], flag.Args()[2])
+	case "restart_workers":
+		err = RestartWorkers("lte-master")
+	case "restart_master":
+		err = RestartMaster("lte-master")
+	case "restart_demo":
+		err = RestartDemo("lte-master")
 	default:
 		fmt.Fprintf(os.Stderr, "%s: unknown command %s\n", os.Args[0], commandName)
 	}
