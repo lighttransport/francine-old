@@ -1,0 +1,23 @@
+{
+    "use_redis_queue" : false,
+    "use_redis_output" : true,
+    "redis_servername" : "172.17.42.1",
+    "redis_port" : 6379,
+    "outputfilename" : "teapot.jpg",
+    "batch" : true,
+    "progressive" : false,
+    "plane" : true,
+    "step" : 1,
+    "eye" : [0.0, 20.0, 80.0],
+    "lookat" : [0.0, 0.0, 0.0],
+    "up" : [0.0, 1.0, 0.0],
+    "fov" : 45.0,
+    "subsamples" : 2,
+    "window_width" : 256,
+    "window_height" : 256,
+    "sunsky_timeofday" : 18.75,
+    "scenefile" : "./scene/teapot_scene.json",
+    "exposure" : 1.0,
+    "dummy" : 0
+}
+

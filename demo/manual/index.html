@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <script type="text/javascript" src="js/jquery.min.js"></script>
+  <script type="text/javascript" src="js/bootstrap.js"></script>
+  <link href="css/bootstrap.css" rel="stylesheet">
+  <link href='https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700' rel='stylesheet' type='text/css'>
+</head>
+<body>
+<div class="container">
+<div class="span9">
+<h1 id="lte-shader-language-specification">LTE shader language specification</h1>
+
+<p>(C) Light Transport Entertainment Inc.</p>
+
+<p>Confidential.</p>
+
+<h2 class="no_toc" id="table-of-contents">Table of contents</h2>
+<ul id="markdown-toc">
+  <li><a href="#lte-shader-language-specification">LTE shader language specification</a>    <ul>
+      <li><a href="#warning">Warning</a></li>
+      <li><a href="#version">Version</a>        <ul>
+          <li><a href="#changes-in-111201402">Changes in 1.1.1(2014.02)</a></li>
+          <li><a href="#changes-in-110201401">Changes in 1.1.0(2014.01)</a></li>
+        </ul>
+      </li>
+      <li><a href="#shader-lanuage-syntax">Shader lanuage syntax</a></li>
+      <li><a href="#shader-interface">Shader interface</a></li>
+      <li><a href="#vector-types">Vector types</a></li>
+      <li><a href="#shader-environment">Shader environment</a></li>
+      <li><a href="#built-in-functions">Built-in functions</a>        <ul>
+          <li><a href="#built-in-math-and-core-functions">Built-in math and core functions</a></li>
+          <li><a href="#built-in-shader-functions">Built-in shader functions</a></li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h2 id="warning">Warning</h2>
+
+<p>Note that the spec is subject to change in the future.</p>
+
+<h2 id="version">Version</h2>
+
+<p>1.1.1(2014.02)</p>
+
+<h3 id="changes-in-111201402">Changes in 1.1.1(2014.02)</h3>
+
+<ul>
+  <li>Add noise functions.</li>
+</ul>
+
+<h3 id="changes-in-110201401">Changes in 1.1.0(2014.01)</h3>
+
+<ul>
+  <li>Initial support of OpenCL(tm) C like syntax</li>
+</ul>
+
+<h2 id="shader-lanuage-syntax">Shader lanuage syntax</h2>
+
+<p>LTE shader languate syntax is a variant of OpenCL(tm) C version 1.2. Basically its a C99 + vector type extension and supports some builtin functions.</p>
+
+<p>For details about OpenCL(tm) C language syntax, please see </p>
+
+<p><a href="http://www.khronos.org/registry/cl/sdk/1.2/docs/man/xhtml/">http://www.khronos.org/registry/cl/sdk/1.2/docs/man/xhtml/</a></p>
+
+<h2 id="shader-interface">Shader interface</h2>
+
+<pre><code class="language-c">#include "shader.h"
+
+void shader(ShaderEnv* env)
+{
+
+}
+</code></pre>
+
+<p><code>ShaderEnv</code> struct includes input and output parameters.</p>
+
+<h2 id="vector-types">Vector types</h2>
+
+<p>LTE shader laguage support <code>vec2</code>, <code>vec3</code> and <code>vec4</code> vector type, whose are composed as <code>float x 2</code>, <code>float x 3</code> and <code>float x 4</code> elements respectively. each element can be accessed like following: </p>
+
+<pre><code class="language-c">
+vec2 c;
+float cx = c.x;
+float cy = c.y;
+
+vec3 b;
+float bx = b.x;
+float by = b.y;
+float bz = b.z;
+
+vec4 a;
+float ax = a.x;
+float ay = a.y;
+float az = a.z;
+float aw = a.w;
+float elem0 = a[0];
+</code></pre>
+
+<h2 id="shader-environment">Shader environment</h2>
+
+<table class="table table-striped">  <thead>
+    <tr>
+      <th>name</th>
+      <th>type</th>
+      <th>qualifier</th>
+      <th>comment</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Ci</td>
+      <td>vec4</td>
+      <td>out</td>
+      <td>Output color</td>
+    </tr>
+    <tr>
+      <td>Oi</td>
+      <td>vec4</td>
+      <td>out</td>
+      <td>Output opacity</td>
+    </tr>
+    <tr>
+      <td>I</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Incident ray vector</td>
+    </tr>
+    <tr>
+      <td>N</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Shading normal(world coord)</td>
+    </tr>
+    <tr>
+      <td>Ng</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Geometric normal(world coord)</td>
+    </tr>
+    <tr>
+      <td>tangent</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Tangent vector(world coord)</td>
+    </tr>
+    <tr>
+      <td>binormal</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Binormal vector(world coord)</td>
+    </tr>
+    <tr>
+      <td>E</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Eye(Camera) position(world coord)</td>
+    </tr>
+    <tr>
+      <td>P</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Surface position(world coord)</td>
+    </tr>
+    <tr>
+      <td>u, v</td>
+      <td>float</td>
+      <td>in</td>
+      <td>Barycentric coordinate</td>
+    </tr>
+    <tr>
+      <td>s, t</td>
+      <td>float</td>
+      <td>in</td>
+      <td>UV texture coordinate</td>
+    </tr>
+    <tr>
+      <td>depth</td>
+      <td>float</td>
+      <td>in</td>
+      <td>Distance to hit point</td>
+    </tr>
+    <tr>
+      <td>material_id</td>
+      <td>uint16</td>
+      <td>in</td>
+      <td>Material ID(per face)</td>
+    </tr>
+    <tr>
+      <td>trace_depth</td>
+      <td>int</td>
+      <td>in</td>
+      <td>Ray depth</td>
+    </tr>
+    <tr>
+      <td>hit_light_obj</td>
+      <td>int</td>
+      <td>in</td>
+      <td>Non-zero if the ray hits light object</td>
+    </tr>
+    <tr>
+      <td>face_id</td>
+      <td>uint32</td>
+      <td>in</td>
+      <td>Face ID of hit point</td>
+    </tr>
+    <tr>
+      <td>ambient</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Ambient value(RGB)</td>
+    </tr>
+    <tr>
+      <td>diffuse</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Diffuse value(RGB)</td>
+    </tr>
+    <tr>
+      <td>reflection</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Reflection value(RGB)</td>
+    </tr>
+    <tr>
+      <td>refraction</td>
+      <td>vec4</td>
+      <td>in</td>
+      <td>Refrection value(RGB)</td>
+    </tr>
+    <tr>
+      <td>ior</td>
+      <td>float</td>
+      <td>in</td>
+      <td>Index of reflection</td>
+    </tr>
+  </tbody>
+</table>
+<h2 id="built-in-functions">Built-in functions</h2>
+
+<h3 id="built-in-math-and-core-functions">Built-in math and core functions</h3>
+
+<p>LTE implements some OpenCL C like math and core functions listed below.</p>
+
+<pre><code class="language-c">// constants
+#define M_E_F        2.71828182845904523536028747135f
+#define M_LOG2E_F    1.44269504088896340735992468100f
+#define M_LOG10E_F   0.434294481903251827651128918917f
+#define M_LN2_F      0.693147180559945309417232121458f
+#define M_LN10_F     2.30258509299404568401799145468f
+#define M_PI_F       3.14159265358979323846264338328f
+#define M_PI_2_F     1.57079632679489661923132169164f
+#define M_PI_4_F     0.785398163397448309615660845820f
+#define M_1_PI_F     0.318309886183790671537767526745f
+#define M_2_PI_F     0.636619772367581343075535053490f
+#define M_2_SQRTPI_F 1.12837916709551257389615890312f
+#define M_SQRT2_F    1.41421356237309504880168872421f
+#define M_SQRT1_2_F  0.707106781186547524400844362105f
+
+#define M_E        2.71828182845904523536028747135
+#define M_LOG2E    1.44269504088896340735992468100
+#define M_LOG10E   0.434294481903251827651128918917
+#define M_LN2      0.693147180559945309417232121458
+#define M_LN10     2.30258509299404568401799145468
+#define M_PI       3.14159265358979323846264338328
+#define M_PI_2     1.57079632679489661923132169164
+#define M_PI_4     0.785398163397448309615660845820
+#define M_1_PI     0.318309886183790671537767526745
+#define M_2_PI     0.636619772367581343075535053490
+#define M_2_SQRTPI 1.12837916709551257389615890312
+#define M_SQRT2    1.41421356237309504880168872421
+#define M_SQRT1_2  0.707106781186547524400844362105
+
+// gentype = float or vec4
+// ftype = float or double
+ftype abs(ftype);
+ftype acos(ftype);
+ftype acosh(ftype);
+ftype asin(ftype);
+ftype asinh(ftype);
+ftype atan(ftype);
+ftype atanh(ftype);
+ftype atan2(ftype, ftype);
+ftype sin(ftype);
+ftype cos(ftype);
+ftype tan(ftype);
+ftype sqrt(ftype);
+ftype fabs(ftype);
+ftype exp(ftype);
+ftype exp2(ftype);
+ftype log(ftype);
+ftype log2(ftype);
+ftype pow(ftype, ftype);
+ftype floor(ftype);
+ftype ceil(ftype);
+ftype fmod(ftype, ftype);
+
+int isinf(ftype);
+int isfinite(ftype);
+int isnan(ftype);
+
+ftype min(ftype x, ftype y);
+ftype max(ftype x, ftype y);
+
+ftype sign(ftype x);
+ftype radians(ftype x);
+ftype degrees(ftype x);
+ftype mix(ftype x, ftype y, ftype t);
+gentype mix(gentype x, gentype y, gentype t);
+gentype mix(gentype x, gentype y, float t);
+ftype clamp(ftype x, ftype minval, ftype maval);
+ftype step(ftype edge, ftype x);
+ftype smoothstep(ftype edge0, ftype edge1, ftype x);
+
+float dot(vec4 x, vec4 y);
+vec4 cross(vec4 x, vec4 y); // Calculte 3D cross vector(ignore w component)
+float length(vec4 x);
+ftype distance(vec4 x, vec4 y);
+vec4 normalize(vec4 x); // Normalize 3D vector(ignore w component)
+</code></pre>
+
+<h3 id="built-in-shader-functions">Built-in shader functions</h3>
+
+<pre><code class="language-c">float randomreal();
+</code></pre>
+
+<p>Retruns pseudo random number in <code>[0.0, 1.0]</code>.</p>
+
+<pre><code class="language-c">float trace(ShaderEnv* e, const vec4* org, const vec4* dir, vec4* cs);
+</code></pre>
+
+<p>Trace a ray from <code>org</code> to <code>dir</code> direction.
+If there was an intersection, the function returns the distance to the hit point.</p>
+
+<p>Check intersection test only when <code>cs</code> is NULL.
+If <code>cs</code> was not NULL and the hit point was found, the renderer invokes shading at the hit point and returns the shading result to <code>cs</code>.
+In this case, there&#8217;s an possiblity that the shader recursively trace a ray in inifite, thus user must limit the number of ray depth by checking <code>trace_depth</code> parameter.</p>
+
+<pre><code class="language-c">int texture2D(ShaderEnv* e, int texID, float u, float v, vec4* cs);
+</code></pre>
+
+<p>Fetch texel of 2D texture specified by <code>texID</code> at <code>(u, v)</code> coordiante and returns the result to <code>cs</code>. Texel value will be bilinearly interpolated.</p>
+
+<p>If <code>texID</code> was invalid, <code>cs</code> will be filled with zeros.</p>
+
+<pre><code class="language-c">float snoise2d(vec2 x);
+</code></pre>
+
+<p>Compute 2D simplex noise.</p>
+
+<pre><code class="language-c">float snoise3d(vec3 x);
+</code></pre>
+
+<p>Compute 3D simplex noise.</p>
+
+<pre><code class="language-c">float snoise4d(vec4 x);
+</code></pre>
+
+<p>Compute 4D simplex noise.</p>
+
+<pre><code class="language-c">int textureGrad2D(ShaderEnv* e, int texID, float u, float v, vec4* cs00, vec4* cs10, vec4* cs01);
+</code></pre>
+
+<p>Fetch texels of 2D texture specified by <code>texID</code> at <code>(u, v)</code> coordiante and its neighbor texels(<code>(tu, tv)</code>, <code>(tu+1, tv)</code> and <code>(tu, tv+1)</code>) and returns these into <code>cs00</code>, <code>cs01</code> and <code>cs01</code> appropriately.</p>
+
+<p>Texel values are not interpolated.</p>
+
+<p>If <code>texID</code> was invalid, <code>cs</code> will be filled with zeros.</p>
+
+<p>This function is used for example bump mapping.</p>
+
+<pre><code class="language-c">void computeFresnel(ShaderEnv* e, vec4* refl, vec4* refr, float* kr, float* kt, const vec4* wi, const vec4* n, float eta, vec4* cs)
+</code></pre>
+
+<p>Compute fresnel coeficient.</p>
+
+<p><code>refl</code> and <code>refr</code> are normalized reflection direction and refraction direction respectively. <code>kr</code> and <code>kt</code> are fresnel coefficient of reflection and refraction respectively, and <code>kr + kt = 1</code></p>
+
+<p><code>wi</code> is a normaized incoming vector. <code>n</code> is a normalized normal vector. <code>eta</code> is an ratio of index of refraction <code>n1/n2</code>, where <code>n1</code> is an index of refraction of outer medium(e.g. air) and <code>n2</code> is an index of refraction of inner medium(e.g. water). For example <code>eta = 1.0/1.3</code> when the ray travels from air to water.</p>
+
+<p><code>cs</code> is not used.</p>
+
+<pre><code class="language-c">void envmap3D(ShaderEnv* e, const vec4* dir, vec4* cs);
+</code></pre>
+
+<p>Fetch environment map in the direction <code>dir</code> and returns its color to <code>cs</code></p>
+
+<p><code>cs</code> returns undefined value when the scene does not contain environment map.</p>
+
+<pre><code class="language-c">void sunsky(ShaderEnv* e, float theta, float phi, vec4* cs);
+</code></pre>
+
+<p>Compute sky color of <code>(theta, phi)</code> direction(longitude, latitude) and return it to <code>cs</code>.</p>
+
+<p><code>theta</code> in <code>[0, pi/2]</code>, <code>phi</code> in <code>[0, 2pi]</code>.</p>
+
+<p>EoL.</p>
+
+</div>
+</div>
+</body>
+</html>

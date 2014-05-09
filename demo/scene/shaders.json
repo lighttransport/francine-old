@@ -1,0 +1,7 @@
+[
+  {
+    "resource": "./shader.c",
+    "id": "shader000",
+    "watch": true
+  }
+]
