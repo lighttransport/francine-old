@@ -154,7 +154,7 @@ func main() {
 		os.Exit(1)
 	}
 
-/*	if len(os.Args) > 1 && os.Args[1] == "create" {
+	/*	if len(os.Args) > 1 && os.Args[1] == "create" {
 		createWorkerInstance(etcdHost)
 		os.Exit(0)
 	}*/

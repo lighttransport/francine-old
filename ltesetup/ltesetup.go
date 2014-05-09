@@ -135,8 +135,11 @@ func SendCreateWorker(masterInstance string) error {
 	return nil
 }
 
-func UpdateImages(masterInstance string) error {
-	images := []string {"lte_master", "lte_worker", "lte_demo"}
+func UpdateImages(masterInstance string, imageName string) error {
+	images := []string{"lte_master", "lte_worker", "lte_demo"}
+	if imageName != "" {
+		images = []string{imageName}
+	}
 	ssh := exec.Command("gcutil", "ssh", "--ssh_arg", "-L 5000:localhost:5000", "--ssh_arg", "-n", "--ssh_arg", "-t", "--ssh_arg", "-t", masterInstance)
 	ssh.Stdout = os.Stdout
 	ssh.Stderr = os.Stderr
@@ -148,14 +151,14 @@ func UpdateImages(masterInstance string) error {
 	time.Sleep(15 * time.Second)
 
 	for _, image := range images {
-		cmd := exec.Command("sudo", "docker", "tag", "lighttransport/" + image, "localhost:5000/" + image)
+		cmd := exec.Command("sudo", "docker", "tag", "lighttransport/"+image, "localhost:5000/"+image)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
 			return err
 		}
-		cmd = exec.Command("sudo", "docker", "push", "localhost:5000/" + image)
+		cmd = exec.Command("sudo", "docker", "push", "localhost:5000/"+image)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -249,7 +252,11 @@ How to Setup:
 	case "delete_master":
 		err = DeleteInstance("lte-master")
 	case "update_images":
-		err = UpdateImages("lte-master")
+		imageName := ""
+		if len(flag.Args()) >= 2 {
+			imageName = flag.Args()[1]
+		}
+		err = UpdateImages("lte-master", imageName)
 	case "create_worker":
 		err = SendCreateWorker("lte-master")
 	case "auth":

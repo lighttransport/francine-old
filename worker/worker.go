@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -44,19 +45,17 @@ func getEtcdValue(etcdHost, key string) (string, error) {
 	return parsed.Node.Value, nil
 }
 
-
-
 func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redisPort string) {
 	var msg struct {
 		SessionId string `json:"session_id"`
-		ShaderId  string `json:"shader_id"`
+		ShaderId  int    `json:"shader_id"`
 		Code      string `json:"code"`
 	}
 
 	json.Unmarshal(msgBytes, &msg)
 
 	exeDir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
-	writtenDir := exeDir + "/shaders/" + msg.ShaderId
+	writtenDir := exeDir + "/shaders/" + strconv.Itoa(msg.ShaderId)
 
 	if err := os.MkdirAll(writtenDir, 0755); err != nil {
 		fmt.Println(err.Error())
@@ -73,11 +72,15 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 	shaderFile.Close()
 
 	// do link check
-	linkCheckCmd := exec.Command(ltePath, "--linkcheck", "--session=" + msg.SessionId,
-		"--resource_basepath=" + writtenDir,
+	linkCheckCmd := exec.Command(ltePath, "--linkcheck", "--session="+msg.SessionId,
+		"--resource_basepath="+writtenDir,
+		"--resource_basepath=/home/default/scene",
+		"--redis_host="+redisHost, "--redis_port="+redisPort,
 		"-c", "scene/teapot_redis.json")
+	fmt.Printf("[WORKER] exec: %+v\n", linkCheckCmd.Args)
 	var linkCheckOutput bytes.Buffer
 	linkCheckCmd.Stderr = &linkCheckOutput
+	linkCheckCmd.Stdout = &linkCheckOutput
 
 	if err := linkCheckCmd.Run(); err != nil {
 		if _, ok := err.(*exec.ExitError); ok {
@@ -92,7 +95,8 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 
 	rendererCmd := exec.Command(ltePath, "--session="+msg.SessionId,
 		"--resource_basepath="+writtenDir,
-		"--redis_host=" + redisHost, "--redis_port=" + redisPort,
+		"--resource_basepath=/home/default/scene",
+		"--redis_host="+redisHost, "--redis_port="+redisPort,
 		"scene/teapot_redis.json")
 	var rendererStderr bytes.Buffer
 	var rendererStdout bytes.Buffer
@@ -168,7 +172,7 @@ func main() {
 		}
 
 		if err != nil {
-			fmt.Println(err.Error());
+			fmt.Println(err.Error())
 			redisConn.Close()
 			os.Exit(1)
 		}
