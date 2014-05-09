@@ -1,0 +1,12 @@
+language: go
+
+go:
+  - tip
+
+install:
+  - go get code.google.com/p/goauth2/oauth
+  - go get github.com/garyburd/redigo/redis
+
+script:
+  - cd master && go build
+  - cd worker && go build
