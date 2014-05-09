@@ -39,7 +39,7 @@ func getEtcdValue(etcdHost, key string) (string, error) {
 
 	json.Unmarshal(body, &parsed)
 
-	fmt.Println("[WORKER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
+	fmt.Println("[MASTER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
 
 	return parsed.Node.Value, nil
 }
@@ -76,7 +76,7 @@ func createWorkerInstance(etcdHost string) {
 	machineType := "n1-standard-1"
 
 	var cloudConfig string
-	if r, err := ioutil.ReadFile("/tmp/cloud-config.yaml"); err != nil {
+	if r, err := ioutil.ReadFile("/tmp/cloud-config-worker.yaml"); err != nil {
 		log.Fatal(err)
 	} else {
 		cloudConfig = string(r)

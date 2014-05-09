@@ -13,38 +13,38 @@ import (
 	"strings"
 )
 
-var etcdHost string
-
 const (
 	ltePath      = "/bin/lte"
 	redisMaxIdle = 5
 	lteAckTtl    = 3600 // one hour
 )
 
-type config struct {
-	Node struct {
-		Value string `json:"value"`
-	} `json:"node"`
-}
-
-func getConfigFromEtcd(etcdHost string) (*config, error) {
-	fmt.Println("[WORKER] etcd host: " + etcdHost)
-	resp, err := http.Get("http://" + etcdHost + "/v2/keys/redis-server")
+func getEtcdValue(etcdHost, key string) (string, error) {
+	resp, err := http.Get("http://" + etcdHost + "/v2/keys/" + key)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	var config config
-	json.Unmarshal(body, &config)
+	var parsed struct {
+		Node struct {
+			Value string `json:"value"`
+		} `json:"node"`
+	}
 
-	return &config, nil
+	json.Unmarshal(body, &parsed)
+
+	fmt.Println("[WORKER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
+
+	return parsed.Node.Value, nil
 }
+
+
 
 func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redisPort string) {
 	var msg struct {
@@ -73,8 +73,9 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 	shaderFile.Close()
 
 	// do link check
-	linkCheckCmd := exec.Command(ltePath, "--linkcheck", "--session="+msg.SessionId,
-		"--resource_basepath="+writtenDir, "-c", "scene/teapot_redis.json")
+	linkCheckCmd := exec.Command(ltePath, "--linkcheck", "--session=" + msg.SessionId,
+		"--resource_basepath=" + writtenDir,
+		"-c", "scene/teapot_redis.json")
 	var linkCheckOutput bytes.Buffer
 	linkCheckCmd.Stderr = &linkCheckOutput
 
@@ -91,7 +92,7 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 
 	rendererCmd := exec.Command(ltePath, "--session="+msg.SessionId,
 		"--resource_basepath="+writtenDir,
-		"--redis_host="+redisHost, "--redis_port="+redisPort,
+		"--redis_host=" + redisHost, "--redis_port=" + redisPort,
 		"scene/teapot_redis.json")
 	var rendererStderr bytes.Buffer
 	var rendererStdout bytes.Buffer
@@ -132,7 +133,7 @@ func sendLteAck(data map[string]string, sessionId string, redisPool *redis.Pool)
 		fmt.Println(err.Error())
 	}
 
-	fmt.Println("lte-ack end")
+	fmt.Printf("[WORKER]lte-ack end: session:%s data: %+v\n", sessionId, data)
 }
 
 func main() {
@@ -143,13 +144,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	config, err := getConfigFromEtcd(etcdHost)
+	redisUrl, err := getEtcdValue(etcdHost, "redis-server")
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
-
-	redisUrl := config.Node.Value
 	redisUrlSplit := strings.Split(redisUrl, ":")
 	redisHost, redisPort := redisUrlSplit[0], redisUrlSplit[1]
 

@@ -25,6 +25,6 @@ cp /lib64/libpthread.so.0 docker_dist
 
 # generate dummy directories
 mkdir docker_dist/shader
-echo "dummuy" > docker_dist/shader/dummy
+echo "dummy" > docker_dist/shader/dummy
 mkdir docker_dist/scene
-cp -r /tmp/scene docker_dist/scene
+echo "dummy" > docker_dist/scene/dummy

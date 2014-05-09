@@ -20,7 +20,9 @@ coreos:
 
         [Service]
         ExecStartPre=/bin/sh -xc "/usr/bin/docker pull `/usr/bin/etcdctl get /lte-bin-url`"
-        ExecStart=/bin/sh -xc "/usr/bin/docker run -e \"ETCD_HOST=172.17.42.1:4001\" `/usr/bin/etcdctl get /lte-bin-url` /bin/worker"
+        ExecStart=/bin/sh -xc "/usr/bin/docker run -e ETCD_HOST=172.17.42.1:4001 -e WORKER_NAME=<hostname> -w /home/default `/usr/bin/etcdctl get /lte-bin-url` /bin/worker"
+        Restart=always
+        RestartSec=30
 
         [Install]
         WantedBy=multi-user.target

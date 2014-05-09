@@ -33,11 +33,25 @@ coreos:
         [Service]
         ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /token-url <token_url>; exit 0"
         ExecStartPre=/usr/bin/docker pull 127.0.0.1:5000/lte_master
-        ExecStartPre=/usr/bin/mkdir -p /tmp/supervisorlog
         ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /redis-server $private_ipv4:6379; exit 0"
-        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /lte-bin-url $private_ipv4:5000/lte_bin; exit 0"
-        ExecStart=/usr/bin/docker run -p 7000:7000 -e ETCD_HOST=172.17.42.1:4001 -e REDIS_HOST=$private_ipv4 -v /tmp/supervisorlog:/var/log/supervisor 127.0.0.1:5000/lte_master /usr/bin/supervisord
-
+        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /lte-bin-url $private_ipv4:5000/lte_worker; exit 0"
+        ExecStart=/usr/bin/docker run -p 80:80 -e ETCD_HOST=172.17.42.1:4001 127.0.0.1:5000/lte_master /bin/master
+        Restart=always
+        RestartSec=30
+        [Install]
+        WantedBy=multi-user.target
+    - name: ltedemo.service
+      command: start
+      content: |
+        [Unit]
+        Description=LTE Demo Container
+        After=registry.service etcd.service redis.service ltemaster.service
+        Requires=registry.service etcd.service redis.service ltemaster.service
+        [Service]
+        ExecStartPre=/usr/bin/docker pull 127.0.0.1:5000/lte_demo
+        ExecStart=/usr/bin/docker run -p 7000:7000 -e ETCD_HOST=172.17.42.1:4001 -e REDIS_HOST=$private_ipv4 127.0.0.1:5000/lte_demo /usr/bin/nodejs /tmp/server/server.js
+        Restart=always
+        RestartSec=30
         [Install]
         WantedBy=multi-user.target
     - name: redis.service

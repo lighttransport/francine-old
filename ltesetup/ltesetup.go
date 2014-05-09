@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type InstConfig struct {
@@ -91,13 +92,13 @@ func GetToken() (string, error) {
 }
 
 func CreateMaster(instance string) error {
-	reqs := []string{"cloud-config.yaml"}
+	reqs := []string{"cloud-config-master.yaml"}
 	var err error
 	if err = CheckFiles(reqs); err != nil {
 		return err
 	}
 
-	prev, err := ioutil.ReadFile("cloud-config.yaml")
+	prev, err := ioutil.ReadFile("cloud-config-master.yaml")
 	if err != nil {
 		return err
 	}
@@ -107,11 +108,11 @@ func CreateMaster(instance string) error {
 		return err
 	}
 
-	if err = ioutil.WriteFile("cloud-config.yaml",
+	if err = ioutil.WriteFile("cloud-config-master.yaml",
 		[]byte(strings.Replace(string(prev), "<token_url>", token, -1)), 0644); err != nil {
 		return err
 	}
-	defer ioutil.WriteFile("cloud-config.yaml", prev, 0644)
+	defer ioutil.WriteFile("cloud-config-master.yaml", prev, 0644)
 
 	if err = AddInstance(&InstConfig{
 		name:        instance,
@@ -119,7 +120,7 @@ func CreateMaster(instance string) error {
 		machineType: "n1-standard-1",
 		network:     "lte-cluster",
 		ipType:      "ephemeral",
-		cloudConfig: "cloud-config.yaml"}); err != nil {
+		cloudConfig: "cloud-config-master.yaml"}); err != nil {
 		return err
 	}
 
@@ -131,6 +132,42 @@ func SendCreateWorker(masterInstance string) error {
 		"sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush worker-q create"); err != nil {
 		return err
 	}
+	return nil
+}
+
+func UpdateImages(masterInstance string) error {
+	images := []string {"lte_master", "lte_worker", "lte_demo"}
+	ssh := exec.Command("gcutil", "ssh", "--ssh_arg", "-L 5000:localhost:5000", "--ssh_arg", "-n", "--ssh_arg", "-t", "--ssh_arg", "-t", masterInstance)
+	ssh.Stdout = os.Stdout
+	ssh.Stderr = os.Stderr
+	if err := ssh.Start(); err != nil {
+		return err
+	}
+
+	fmt.Println("Wait 15 seconds for ssh tunneling to connect...")
+	time.Sleep(15 * time.Second)
+
+	for _, image := range images {
+		cmd := exec.Command("sudo", "docker", "tag", "lighttransport/" + image, "localhost:5000/" + image)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+		cmd = exec.Command("sudo", "docker", "push", "localhost:5000/" + image)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+	}
+
+	if err := ssh.Process.Kill(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -175,26 +212,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "usage: %s [<options>] <command>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `commands:
 	create_master
+	update_images
 	delete_master
 	create_worker
 	auth <client id> <client secret>
 
 How to Setup:
 	./ltesetup create_master
-	gcutil ssh --ssh_arg "-L 5000:localhost:5000" lte-master
-
-	cd ../builder
-	./build_builder.sh
-	./run_builder.sh
-
-	cd ../master
-	./build.sh
-
-	cd ../ltesetup
+	# build demo, master and worker containers first
+	./ltesetup update_images
 	./ltesetup auth <client id> <client secret>
 	./ltesetup create_worker
 `)
-		// update_images
+		// gcutil ssh --ssh_arg "-L 5000:localhost:5000" lte-master
 		// create_network
 		// delete_worker
 
@@ -218,8 +248,8 @@ How to Setup:
 		err = CreateMaster("lte-master")
 	case "delete_master":
 		err = DeleteInstance("lte-master")
-	/*case "update_images":
-		err = UpdateImages("lte-master")*/
+	case "update_images":
+		err = UpdateImages("lte-master")
 	case "create_worker":
 		err = SendCreateWorker("lte-master")
 	case "auth":
