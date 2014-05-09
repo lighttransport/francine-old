@@ -8,6 +8,6 @@ install:
   - go get github.com/garyburd/redigo/redis
 
 script:
-  - go build github.com/lighttransport/francine/master
-  - go build github.com/lighttransport/francine/worker
-  - go build github.com/lighttransport/francine/ltesetup
+  - cd $TRAVIS_BUILD_DIR/master && go build
+  - cd $TRAVIS_BUILD_DIR/worker && go build 
+  - cd $TRAVIS_BUILD_DIR/ltesetup && go build 
