@@ -224,14 +224,14 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s [<options>] <command>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `commands:
-	create_master
-	update_images
-	delete_master
-	create_worker
-	auth <client id> <client secret>
-	restart_workers
-	restart_master
-	restart_demo
+	create_master : Create the master instance in GCE
+	update_images : Update docker images
+	delete_master : Delete the master instance in GCE
+	create_worker : Create a worker instance in GCE
+	auth <client id> <client secret> : Register OAuth token for worker instance creation
+	restart_workers : Restart worker containers
+	restart_master : Restart the master container
+	restart_demo : Restart the demo container
 
 How to Setup:
 	./ltesetup create_master
@@ -239,6 +239,7 @@ How to Setup:
 	./ltesetup update_images
 	./ltesetup auth <client id> <client secret>
 	./ltesetup create_worker
+
 `)
 		// create_network
 		// delete_worker
