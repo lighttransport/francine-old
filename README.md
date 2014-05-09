@@ -4,6 +4,8 @@
 
 Renderer backend for massive server environment.
 
+[![Build Status](https://travis-ci.org/lighttransport/francine.svg?branch=master)](https://travis-ci.org/lighttransport/francine)
+
 ## Usage
 
 ### Build master
