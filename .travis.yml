@@ -11,3 +11,7 @@ script:
   - cd $TRAVIS_BUILD_DIR/master && go build
   - cd $TRAVIS_BUILD_DIR/worker && go build 
   - cd $TRAVIS_BUILD_DIR/ltesetup && go build 
+
+notifications:
+  slack: lighttransport:RYFCeVSYC2dibezF5aikUhqa
+
