@@ -3,8 +3,9 @@ FROM centos
 MAINTAINER peryaudo, peryaudo@gmail.com
 
 RUN yum install -y tar git bzip2
-RUN cd /tmp && curl -O https://go.googlecode.com/files/go1.2.1.linux-amd64.tar.gz
-RUN cd /tmp && tar -C /usr/local -xzf go1.2.1.linux-amd64.tar.gz
+RUN cd /tmp && curl -O https://storage.googleapis.com/golang/go1.2.2.linux-amd64.tar.gz
+RUN cd /tmp && tar -C /usr/local -xzf go1.2.2.linux-amd64.tar.gz
+
 RUN mkdir /tmp/workspace /tmp/worker /tmp/lte /tmp/docker_dist /tmp/workspace/src
 
 ENV PATH /usr/local/go/bin:$PATH

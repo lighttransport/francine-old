@@ -3,14 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"github.com/garyburd/redigo/redis"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -42,64 +41,95 @@ func getEtcdValue(etcdHost, key string) (string, error) {
 
 	json.Unmarshal(body, &parsed)
 
-	fmt.Println("[WORKER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
+	log.Println("[WORKER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
 
 	return parsed.Node.Value, nil
 }
 
+type Resource struct {
+	Name string
+	Hash string
+}
+
+type Message struct {
+	RenderId  string
+	SessionId string
+	InputJson string
+	Resources []Resource
+}
+
+type LteAck struct {
+	Status string
+	Log    string
+}
+
 func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redisPort string) {
-	var msg struct {
-		SessionId string `json:"session_id"`
-		ShaderId  int    `json:"shader_id"`
-		Code      string `json:"code"`
-	}
+	conn := redisPool.Get()
+	defer conn.Close()
 
-	json.Unmarshal(msgBytes, &msg)
+	var message Message
 
-	exeDir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
-	writtenDir := exeDir + "/shaders/" + strconv.Itoa(msg.ShaderId)
+	json.Unmarshal(msgBytes, &message)
 
-	if err := os.MkdirAll(writtenDir, 0755); err != nil {
-		fmt.Println(err.Error())
+	resourceDir := "/tmp/renders/" + message.RenderId
+
+	if err := os.MkdirAll(resourceDir, 0755); err != nil {
+		log.Println(err)
 		return
 	}
 
-	// write shader file
-	shaderFile, err := os.Create(writtenDir + "/shader.c")
-	if err != nil {
-		fmt.Println(err.Error())
+	if err := os.Chdir(resourceDir); err != nil {
+		log.Println(err)
 		return
 	}
-	shaderFile.Write([]byte(msg.Code))
-	shaderFile.Close()
+
+	// write the resource files
+	for _, resource := range message.Resources {
+		data, err := conn.Do("GET", "resource:"+resource.Hash)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		// TODO: it has obvious security problem! be aware!
+		absResourcePath := resourceDir + "/" + resource.Name
+		if err = os.MkdirAll(filepath.Dir(absResourcePath), 0755); err != nil {
+			log.Println(err)
+			return
+		}
+
+		file, err := os.Create(absResourcePath)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		file.Write(data.([]byte))
+		file.Close()
+	}
 
 	// do link check
-	linkCheckCmd := exec.Command(ltePath, "--linkcheck", "--session="+msg.SessionId,
-		"--resource_basepath="+writtenDir,
-		"--resource_basepath=/home/default/scene",
+	linkCheckCmd := exec.Command(ltePath, "--linkcheck", "--session="+message.RenderId,
+		"--resource_basepath="+resourceDir,
 		"--redis_host="+redisHost, "--redis_port="+redisPort,
-		"-c", "scene/teapot_redis.json")
-	fmt.Printf("[WORKER] exec: %+v\n", linkCheckCmd.Args)
+		"-c", resourceDir+"/"+message.InputJson)
+	log.Printf("[WORKER] exec: %+v\n", linkCheckCmd.Args)
 	var linkCheckOutput bytes.Buffer
 	linkCheckCmd.Stderr = &linkCheckOutput
 	linkCheckCmd.Stdout = &linkCheckOutput
 
 	if err := linkCheckCmd.Run(); err != nil {
 		if _, ok := err.(*exec.ExitError); ok {
-			sendLteAck(map[string]string{"code": "linkerr", "log": linkCheckOutput.String()},
-				msg.SessionId, redisPool)
+			sendLteAck(&LteAck{Status: "LinkError", Log: linkCheckOutput.String()}, message.RenderId, redisPool)
 			return
 		} else {
-			fmt.Println(err.Error())
-			os.Exit(1)
+			log.Fatalln(err)
 		}
 	}
 
-	rendererCmd := exec.Command(ltePath, "--session="+msg.SessionId,
-		"--resource_basepath="+writtenDir,
-		"--resource_basepath=/home/default/scene",
+	rendererCmd := exec.Command(ltePath, "--session="+message.RenderId,
+		"--resource_basepath="+resourceDir,
 		"--redis_host="+redisHost, "--redis_port="+redisPort,
-		"scene/teapot_redis.json")
+		resourceDir+"/"+message.InputJson)
 	var rendererStderr bytes.Buffer
 	var rendererStdout bytes.Buffer
 	rendererCmd.Stdout = &rendererStdout
@@ -108,24 +138,24 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 	rendererErr := rendererCmd.Run()
 
 	if rendererStdout.Len() > 0 {
-		fmt.Println("lte:stdout: " + rendererStdout.String())
+		log.Println("lte:stdout: " + rendererStdout.String())
 	}
 	if rendererStderr.Len() > 0 {
-		fmt.Println("lte:stderr: " + rendererStderr.String())
+		log.Println("lte:stderr: " + rendererStderr.String())
 	}
 
 	if rendererErr != nil {
-		fmt.Println(rendererErr.Error())
+		log.Println(rendererErr)
 	}
 
-	sendLteAck(map[string]string{"code": "ok"}, msg.SessionId, redisPool)
+	sendLteAck(&LteAck{Status: "Ok"}, message.RenderId, redisPool)
 }
 
-func sendLteAck(data map[string]string, sessionId string, redisPool *redis.Pool) {
+func sendLteAck(data *LteAck, renderId string, redisPool *redis.Pool) {
 	conn := redisPool.Get()
 	defer conn.Close()
 
-	key := "lte-ack:" + sessionId
+	key := "lte-ack:" + renderId
 	strData, _ := json.Marshal(data)
 
 	conn.Send("MULTI")
@@ -136,10 +166,10 @@ func sendLteAck(data map[string]string, sessionId string, redisPool *redis.Pool)
 	_, err := conn.Do("EXEC")
 
 	if err != nil {
-		fmt.Println(err.Error())
+		log.Println(err)
 	}
 
-	fmt.Printf("[WORKER]lte-ack end")
+	log.Println("[WORKER] lte-ack end with " + data.Status)
 }
 
 func sendPings(workerName string, redisPool *redis.Pool) {
@@ -155,20 +185,17 @@ func sendPings(workerName string, redisPool *redis.Pool) {
 func main() {
 	etcdHost := os.Getenv("ETCD_HOST")
 	if etcdHost == "" {
-		fmt.Println("please set ETCD_HOST")
-		os.Exit(1)
+		log.Fatalln("please set ETCD_HOST")
 	}
 
 	workerName := os.Getenv("WORKER_NAME")
 	if workerName == "" {
-		fmt.Println("please set WORKER_NAME")
-		os.Exit(1)
+		log.Fatalln("please set WORKER_NAME")
 	}
 
 	redisUrl, err := getEtcdValue(etcdHost, "redis-server")
 	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
+		log.Fatalln(err.Error())
 	}
 	redisUrlSplit := strings.Split(redisUrl, ":")
 	redisHost, redisPort := redisUrlSplit[0], redisUrlSplit[1]
@@ -186,14 +213,14 @@ func main() {
 	for {
 		redisConn := redisPool.Get()
 
-		resp, err := redisConn.Do("BLPOP", "render-q", cmdQueueName, 1)
+		resp, err := redisConn.Do("BLPOP", "render-queue", cmdQueueName, 1)
 
 		if resp != nil {
 			listName := string(resp.([]interface{})[0].([]byte))
 			popped := resp.([]interface{})[1].([]byte)
 
 			switch listName {
-			case "render-q":
+			case "render-queue":
 				go kickRenderer(popped, redisPool, redisHost, redisPort)
 			case cmdQueueName:
 				switch string(popped) {
@@ -208,9 +235,8 @@ func main() {
 		}
 
 		if err != nil {
-			fmt.Println(err.Error())
 			redisConn.Close()
-			os.Exit(1)
+			log.Fatalln(err)
 		}
 
 		redisConn.Close()

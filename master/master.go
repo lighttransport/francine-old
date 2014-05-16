@@ -5,7 +5,6 @@ import (
 	"code.google.com/p/goauth2/oauth"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"github.com/garyburd/redigo/redis"
 	"io/ioutil"
 	"log"
@@ -39,7 +38,7 @@ func getEtcdValue(etcdHost, key string) (string, error) {
 
 	json.Unmarshal(body, &parsed)
 
-	fmt.Println("[MASTER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
+	log.Println("[MASTER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
 
 	return parsed.Node.Value, nil
 }
@@ -101,10 +100,10 @@ func createWorkerInstance(etcdHost string) {
 		transport.Client()); err != nil {
 		log.Fatal(err)
 	} else {
-		fmt.Println(res)
+		log.Println(res)
 	}
 
-	fmt.Println("[WORKER] waiting 60s for disk preparing...")
+	log.Println("[WORKER] waiting 60s for disk preparing...")
 	time.Sleep(60 * time.Second)
 
 	req := map[string]interface{}{
@@ -142,7 +141,7 @@ func createWorkerInstance(etcdHost string) {
 		req, transport.Client()); err != nil {
 		log.Fatal(err)
 	} else {
-		fmt.Println(res)
+		log.Println(res)
 	}
 }
 
@@ -150,7 +149,7 @@ func main() {
 	etcdHost := os.Getenv("ETCD_HOST")
 
 	if etcdHost == "" {
-		fmt.Println("please set ETCD_HOST")
+		log.Println("please set ETCD_HOST")
 		os.Exit(1)
 	}
 
@@ -167,6 +166,8 @@ func main() {
 		}, redisMaxIdle)
 	defer redisPool.Close()
 
+	go startRestServer(redisPool)
+
 	for {
 		redisConn := redisPool.Get()
 		resp, err := redisConn.Do("BLPOP", "cmd:lte-master", 1)
@@ -178,7 +179,7 @@ func main() {
 				go createWorkerInstance(etcdHost)
 			case "ping":
 				workers[split[1]] = time.Now()
-				fmt.Printf("[MASTER] ping from %s\n", split[1])
+				log.Printf("[MASTER] ping from %s\n", split[1])
 			case "restart_workers":
 				for worker, _ := range workers {
 					redisConn.Do("RPUSH", "cmd:"+worker, "restart")
@@ -188,7 +189,7 @@ func main() {
 
 		if err != nil {
 			redisConn.Close()
-			fmt.Printf("%s; failed, wait 30 seconds and retry...\n", err.Error())
+			log.Printf("%s; failed, wait 30 seconds and retry...\n", err.Error())
 			time.Sleep(30 * time.Second)
 		}
 
