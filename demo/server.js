@@ -6,35 +6,23 @@ var Q = require('q');
 var http = require('http');
 var connect = require('connect');
 var express = require('express');
+var request = require('request');
 
 var app = express();
 var io = require('socket.io');
 var fs = require('fs');
 var spawn = require('child_process').spawn;
-var redis = require('redis');
-var redback = require('redback');
 var assert = require('assert');
 
-// sesssion store
 var sessionStore = new express.session.MemoryStore();
-//var RedisStore = require('connect-redis')(express);
-//var sessionStore = new RedisStore();
 
-// Config
-var port        = 7000;
+// Configurations
+var port                 = 7000;
+var restServerAddr       = process.env.REST_HOST;
+var clang                = 'clang';
 
-//var redisPort       = 16379; // gce
-var redisPort       = 6379; // local
-//var redisServerAddr = "172.17.0.78"; // redis in docker
-//var redisServerAddr = "127.0.0.1"; // redis in local
-var redisServerAddr = process.env.REDIS_HOST;
-
-var clang = 'clang';
-
-var globalID = 0;
+var globalID             = 0;
 var sessionToSocketTable = {};
-
-console.log('redisoPort:' + redisPort)
 
 app.configure(function () {
   app.set('port', process.env.PORT || port);
@@ -62,13 +50,12 @@ app.get('/', function(req, res) {
 });
 
 app.get('/:id', function(req, res) {
-  //console.log(req.params.id);
   console.log('req:sessionID:' + req.sessionID);
 
-  var shader_id = parseInt(req.params.id);
-  if (shader_id > 0) {
-    console.log('store: sess: ' + req.sessionID + ', shaderid: ' + shader_id);
-    storeShaderID(req.sessionID, shader_id, function() {
+  var shaderID = parseInt(req.params.id);
+  if (shaderID > 0) {
+    console.log('store: sess: ' + req.sessionID + ', shaderid: ' + shaderID);
+    storeShaderID(req.sessionID, shaderID, function() {
       res.sendfile(__dirname + '/index.html');
     });
   } else {
@@ -83,13 +70,6 @@ app.get('/manual/index.html', function(req, res) {
 io = io.listen(http.createServer(app).listen(app.get('port')), function() {
       console.log("Express server & socket.io listening on port " + app.get('port'));
 });
-
-//var io = socket_io.listen(app, {secure: true, 'log level': 0});
-// Prevent websocket error.
-// http://stackoverflow.com/questions/11350279/socket-io-does-not-work-on-firefox-chrome
-//io.configure('development', function(){
-//  io.set('transports', ['xhr-polling']);
-//});
 
 io.configure(function(){
 
@@ -107,9 +87,8 @@ io.configure(function(){
       'jsonp-polling'
   ]);
  
-  // Codes to share session between socket.io and http(express).
+  // Sharing session between socket.io and http(express).
   io.set('authorization', function (handshakeData, callback) {
-     console.log(handshakeData);
      console.log('cookie:' + handshakeData.headers.cookie);
 
      if(handshakeData.headers.cookie) {
@@ -132,7 +111,6 @@ io.configure(function(){
             console.log('auth ok!');
 
             assignShaderID(sessionID, function(shaderID) {
-
               // socket.io can see session data.
               handshakeData.cookie = cookie;
               handshakeData.shaderID  = shaderID;
@@ -144,404 +122,210 @@ io.configure(function(){
             });
           }
         });
-
      } else {
         return callback('Cookie must be enabled', false);
      }
-
   });
 });
 
-
-// Assume data is already encoded in base64 format.
-function generateDataURI(mime, data)
-{
-  var datauri = 'data:' + mime + ';base64,' + data;
-  return datauri;
+function generateDataURI(mime, data) {
+  return 'data:' + mime + ';base64,' + data.toString('base64');
 }
 
-var redisClient    = redis.createClient(redisPort, redisServerAddr);
-var redbackClient  = redback.use(redisClient);
-var renderCmdQ     = redbackClient.createCappedList('render_cmd', 1);
+var shaderIDMap = {};
 
 function storeShaderID(sessionID, shaderID, callback) {
-  var key = 'sleditor:shader-id-map';
-
-  redisClient.hset(key, sessionID, shaderID, function(err, reply) {
-      assert(!err);
-      return callback();
-  });
+  shaderIDMap[sessionID] = shaderID;
+  return callback();
 }
 
 function getShaderID(sessionID, callback) {
-  var key = 'sleditor:shader-id-map';
+  if (shaderIDMap[sessionID] == undefined) {
+    return callback(-1);
+  } else {
+    return callback(shaderIDMap[sessionID]);
+  }
+}
 
-  redisClient.hget(key, sessionID, function(err, reply) {
-    console.log("session: " + sessionID);
-    console.log("val    : " + reply);
+function putResourcesWithRest(restSessionID) {
+  var resources = [
+    {from: "teapot_redis.json",    to: "scene/teapot_redis.json"},
+    {from: "teapot_scene.json",    to: "scene/teapot_scene.json"},
+    {from: "teapot.material.json", to: "scene/teapot.material.json"},
+    {from: "shaders.json",         to: "scene/shaders.json"},
+    {from: "teapot.mesh",          to: "scene/teapot.mesh"},
+    {from: "shader.c",             to: "shader.c"},
+    {from: "shader.h",             to: "shader.h"},
+    {from: "procedural-noise.c",   to: "procedural-noise.c"},
+    {from: "light.h",              to: "light.h"}
+  ];
 
-    var val = parseInt(reply)
+  var chain = Q.when(0);
 
-    if (err || reply == undefined || (val < 1)) {
-      return callback(-1); // not assigned yet?
-    } else {
-      return callback(val);
-    }
+  for (var i = 0; i < resources.length; ++i) {
+    request.put({
+      url: 'http://' + restServerAddr + '/sessions/' + restSessionID + '/resources/' + resources[i]['to'],
+      body: fs.readFileSync(__dirname + '/' + resources[i]['from'])
+    });
+  }
 
-  });
+  return;
 }
 
 function assignShaderID(sessionID, callback) {
-
-  getShaderID(sessionID, function(shader_id) {
-    if (shader_id < 1) {
-
-      // Assign new ID
-      redisClient.setnx('lte-counter', 1, function(err, reply) {
-
-        console.log('setnx');
-
-        assert(!err);
-
-        redisClient.get('lte-counter', function(err, reply) {
-
-          console.log('reply:' + reply);
-
-          shader_id = parseInt(reply); // store
-          assert(shader_id > 0);
-
-          console.log('shader_id:assign: ' + shader_id);
-
-          // count up
-          redisClient.incr('lte-counter');
-
-          console.log("shader_id: " + shader_id);
-          //socket.emit("session_notify", shader_id);
-
-          storeShaderID(sessionID, shader_id, function() {
-            callback(shader_id);
-          });
-
-        });
+  getShaderID(sessionID, function(shaderID) {
+    if (shaderID < 1) {
+      request.post({
+        url: 'http://' + restServerAddr + '/sessions',
+        json: { InputJson: 'scene/teapot_redis.json' }
+      }, function(err, res, body) {
+        console.log(body);
+        var restSessionID = body['SessionId'];
+        putResourcesWithRest(restSessionID);
+        return callback(restSessionID);
       });
-
-    } else {
-      callback(shader_id);        
     }
-
   });
 }
 
+// Send custom shader.c to the REST API and render image
+function renderWithCustomShader(sessionID, restSessionID, socket, sessionToSocketTable, code) {
+  request.put({
+    url: 'http://' + restServerAddr + '/sessions/' + restSessionID + '/resources/shader.c',
+    body: code
+  }, function(err, res, body) {
+    request.post({
+      url: 'http://' + restServerAddr + '/sessions/' + restSessionID + '/renders',
+      encoding: null
+    }, function(err, res, body) {
+      switch (res.headers['content-type']) {
+        case 'application/json':
+          var parsed = JSON.parse(body.toString('utf8'));
 
+          console.log('emit compile_result');
+          socket.emit('compile_result', {stderr: parsed['Log'], results: []});
 
-//
-// -------------------------------
-//
+          break;
+        case 'image/jpeg':
+          var dataURI = generateDataURI('image/jpeg', body);
+
+          for (var i = 0; i < sessionToSocketTable[sessionID].length; ++i) {
+            sessionToSocketTable[sessionID][i].emit('render_data', dataURI);
+          }
+
+          console.log('emit render_data to done');
+
+          break;
+        }
+    });
+  });
+
+  return;
+}
+
+// Init local shader code for local clang checking
+function initShaderCode(socket, id) {
+  console.log('initShderCode: id = ' + id);
+
+  assert(id != undefined);
+  assert(id > 0);
+
+  try {
+    var content = fs.readFileSync(__dirname + "/data/" + id + "/shader.c");
+  } catch (err) {
+    console.log("file not found: " + id + "; read default shader"); 
+    var content = fs.readFileSync(__dirname + "/data/0/shader.c"); // must exist
+  }
+
+  socket.emit("init_code", content.toString());
+}
+
+// Do checking with local clang for better error diagnose
+function checkWithClang(sessionID, shaderID, socket, code, callback) {
+  var dir      = __dirname + '/data/' + shaderID;
+  var filepath = dir + '/shader.c';
+  var diag_opt = "-fdiagnostics-print-source-range-info";
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir);
+  }
+
+  fs.writeFileSync(filepath, code);
+
+  console.log(filepath);
+
+  var infos = {};
+  infos['results'] = [];
+  infos['stderr'] = "";
+  
+  var c = spawn(clang, ["-c", "-I/tmp/server", "-D__LTE_CLSHADER__", diag_opt, filepath]);
+
+  c.stdout.setEncoding('utf8');
+  c.stderr.setEncoding('utf8');
+
+  c.stderr.on('data', function (data) {
+    var str = data.toString(), lines = str.split(/(\r?\n)/g);
+    infos['stderr'] += str;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i]
+      var reRange = /shader.c:(\d+):(\d+):\{(\d+):(\d+)-(\d+):(\d+)\}.*: (\w.+):(.*)/
+      var ret = reRange.exec(line)
+      if (ret != null) {
+        infos['results'].push({
+          range:   [ret[3], ret[4], ret[5], ret[6]],
+          type:    (ret[7] == 'fatal error' ? 'error' : ret[7]),
+          message: ret[8] 
+        });
+      } else {
+        var reLine = /shader.c:(\d+):(\d+): (\w.+):(.*)/
+        var ret = reLine.exec(line);
+        if (ret != null) {
+          infos['results'].push({
+            line:    [ret[1], ret[2]],
+            type:    (ret[3] == 'fatal error' ? 'error' : ret[3]),
+            message: ret[4]
+          });
+        }
+      }
+    }
+  });
+
+  c.on('close', function(code) {
+    console.log('close: ' + code);
+    socket.emit('compile_result', infos);
+    if (code == 0) {
+      callback();
+    }
+  });
+}
+
 io.sockets.on('connection', function (socket) {
-
   var shaderID  = socket.handshake.shaderID;
   var sessionID = socket.handshake.sessionID;
   console.log('sessionID: ' + sessionID);
-  console.log('shaderID:  ' + shaderID);
-  //assert(sessionID);
+  console.log('shaderID: ' + shaderID);
   
   if (sessionToSocketTable[sessionID] == undefined) {
-    sessionToSocketTable[sessionID] = []
+    sessionToSocketTable[sessionID] = [];
   }
-  sessionToSocketTable[sessionID].push(socket)
+  sessionToSocketTable[sessionID].push(socket);
   console.log(sessionID + ' len = ' + sessionToSocketTable[sessionID].length);
-
 
   console.log('server: sock io connect');
 
   socket.emit("session_notify", socket.handshake.shaderID);
 
-  function initShaderCode(socket, id) {
-
-    console.log('initShderCode. id = ' + id);
-
-    assert(id != undefined);
-    assert(id > 0);
-
-    try {
-      var content = fs.readFileSync(__dirname + "/data/" + id + "/shader.c");
-    } catch (err) {
-      console.log("file not found: " + id + ". read default shader."); 
-      var content = fs.readFileSync(__dirname + "/data/0/shader.c"); // must exist
-    }
-
-    socket.emit("init_code", content.toString());
-  }
-
-  //// Look-up existing id
-  //getShaderID(sessionID, function(id) {
-
-  //  // save state
-  //  shader_id = id;
-
-  //  console.log('id: ' + id);
-
-  //  initShaderCode(socket, id);
-  //});
-
-  // Also connect to redis channel
-  // [node] <- [renderer]
-  //var renderNotify = redback.createClient(redisPort, redisServerAddr).createChannel('render_notify').subscribe();
-
-  //renderNotify.on('message', function(msg) {
-
-  //  // grab key
-  //  redisClient.get('render_image', function(err, reply) {
-  //    if (!err) {
-  //      //console.log("====> render_image get");
-  //      // reply is JSON string
-  //      var jsonJpeg = JSON.parse(reply)
-
-  //      var uri = generateDataURI('image/jpeg', jsonJpeg['jpegdata']);
-  //      socket.emit('render_data', uri);
-  //    }
-  //  });
-
-
-  //});
-
-  // register ack handler from redis
-  function render_ack(session_id) {
-    console.log('wait ack: ' + session_id);
-
-    var key = 'lte-ack:' + session_id;
-    var timeout = 3600;
-    var rc    = redis.createClient(redisPort, redisServerAddr);
-
-    // first clear ack key
-    rc.del(key, function(err, reply) {
-
-      rc.blpop(key, timeout, function(err, reply) {
-        //console.log(err, reply);
-
-        if (err == null && reply == null) { // maybe timeout
-          // do nothing
-        } else if (reply && reply[1] == undefined) {
-          // do nothing.
-        } else if (!err && !reply) {
-          //console.log('ack:' + reply[1]);
-          //return ok;
-        } else {
-          console.log('ack:');
-          console.log(reply);
-         
-          if (reply && (reply.length > 1) && (reply[1] != undefined)) {
-            var j = JSON.parse(reply[1]);
-
-            console.log('= code =: ' + j['code']);
-
-            if (j['code'] && j['code'] == 'linkerr') {
-
-              var infos = {};
-              infos['stderr'] += j['log'];
-              infos['results'] = []; // empty
-              socket.emit('compile_result', infos);
-              console.log("linkerr: " + j['log']);
-
-              // resubmit event
-              setTimeout(render_ack(session_id), 1000);
-
-            } else if (j['code'] && j['code'] == 'ok') {
-
-              var image_key = 'render_image:' + session_id;
-              console.log('grab image: ' + image_key);
-
-              // grab result
-              rc.get(image_key, function(err, reply) {
-                if (!err) {
-
-                  console.log("====> render_image get");
-
-                  // reply is JSON string
-                  var jsonJpeg = JSON.parse(reply)
-
-                  var uri = generateDataURI('image/jpeg', jsonJpeg['jpegdata']);
-                  console.log('emit render_data');
-
-                  //console.log(sessionToSocketTable[session_id]);
-
-                  for (var i in sessionToSocketTable[session_id]) {
-                    console.log('gid = ' + sessionToSocketTable[session_id][i].globalID);
-                    sessionToSocketTable[session_id][i].emit('render_data', uri);
-                  }
-
-                  console.log('emit render_data to done');
-
-                 // resubmit event
-                 setTimeout(render_ack(session_id), 1000);
-               }
-             });
-            }
-          }
-        }
-
-        //console.log('->-- ack end -----');
-        //console.log(err, reply);
-        //console.log('-<-- ack end -----');
-        
-      });
-    });
-  }
-
-  // initShaderCode(socket, id);
-  // render_ack(sessionID);
-  function myInc() {
-    socket.globalID = globalID++;
-  }
-
-  Q.fcall(initShaderCode(socket, socket.handshake.shaderID)).then(myInc()).then(render_ack(sessionID));
-
+  Q.fcall(initShaderCode(socket, socket.handshake.shaderID)).then(function() { socket.globalID = globalID++; });
 
   socket.on('msg', function(param) {
-    // code.
-    
-    //console.log('msg:' + param['code'])
-    var shader_id = socket.handshake.shaderID;
-    console.log('shader_id:' + shader_id);
+    var shaderID = socket.handshake.shaderID;
+    console.log('shaderID:' + shaderID);
 
-    assert(shader_id > 0); // @fixme
+    assert(shaderID > 0); // @fixme
 
-    var dir = __dirname + '/data/' + shader_id
-    var filepath = dir + '/shader.c';
-    var diag_opt = "-fdiagnostics-print-source-range-info"
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir)
-    }
-    fs.writeFileSync(filepath, param['code'])
-
-    console.log(filepath)
-
-    var infos = {}
-    infos['results'] = []
-    infos['stderr'] = ""
-    
-    var c = spawn(clang, ["-c", "-I/tmp/server", "-D__LTE_CLSHADER__", diag_opt, filepath])
-
-    c.stdout.setEncoding('utf8');
-    c.stdout.on('data', function (data) {
-      //console.log('stdout: ' + data);
-    });
-
-    c.stderr.setEncoding('utf8');
-    c.stderr.on('data', function (data) {
-      var str = data.toString(), lines = str.split(/(\r?\n)/g);
-      infos['stderr'] += str;
-      for (var i = 0; i < lines.length; i++) {
-
-        var line = lines[i]
-        var reRange = /shader.c:(\d+):(\d+):\{(\d+):(\d+)-(\d+):(\d+)\}.*: (\w.+):(.*)/
-        var ret = reRange.exec(line)
-
-        if (ret != null) {
-          var rangeinfo =  [ret[3], ret[4], ret[5], ret[6]]
-          var ty = ret[7]
-          if (ty == 'fatal error') ty = 'error'
-          var msg = ret[8]
-          var info = {}
-          info['range'] = rangeinfo
-          info['type'] = ty
-          info['message'] = msg
-          //console.log(info)
-          infos['results'].push(info);
-        } else {
-
-          var reLine = /shader.c:(\d+):(\d+): (\w.+):(.*)/
-
-          var ret = reLine.exec(line)
-          if (ret != null) {
-            var lineinfo = [ret[1], ret[2]]
-            var ty = ret[3]
-            if (ty == 'fatal error') ty = 'error'
-            var msg = ret[4]
-            var info = {}
-            info['line'] = lineinfo
-            info['type'] = ty
-            info['message'] = msg
-            //console.log(info)
-            infos['results'].push(info);
-          }
-
-        }
-
-      }
-
-    });
-
-    c.on('close', function(code) {
-      console.log('close: ' + code);
-      //console.log('infos:' + JSON.stringify(infos));
-      socket.emit('compile_result', infos);
-
-
-      if (code == 0) {
-
-        var task = {session_id: sessionID, shader_id: shader_id, code: param['code']};
-        //console.log(task);
-
-        console.log('render-q');
-        redisClient.lpush('render-q', JSON.stringify(task));
-
-        //return;
-
-        //// Compile OK. Next do link check.
-        //exec("~/work/glrs-branch/bin/lte --linkcheck -c teapot_redis.json > /dev/null", function(linkcheckcode, linkcheckoutput) {
-        ////console.log("linkcheck");
-        ////exec("./run_docker_lte_linkcheck.sh > /dev/null", function(linkcheckcode, linkcheckoutput) {
-        //  if (linkcheckcode != 1) {
-        //    console.log("linkerr: " + linkcheckoutput);
-        //    infos['stderr'] += linkcheckoutput;
-        //    socket.emit('compile_result', infos);
-        //  } else {
-        //    // Link OK
-        //    console.log("linkcheck OK");
-        //    
-        //    // kick render!
-        //    //cmd = { "shader_changed": {} }
-        //    //var buffer = new Buffer(JSON.stringify(cmd))
-        //    //renderCmdQ.push(buffer, function() {
-        //    //  console.log("kick");
-        //    //});
-        //    
-        //    return;
-
-        //    var cmd = "./run_docker_lte.sh"
-        //    console.log(cmd)
-        //    r = spawn(cmd, [session]);
-        //    r.on('close', function(code) {
-        //      if (code == 0) {
-        //        var image_key = 'render_image';
-
-        //        if (session > 0 ) {
-        //          image_key += ':' + session
-        //        }
-
-        //        console.log('grab image: ' + image_key);
-
-        //        // grab result
-        //        redisClient.get(image_key, function(err, reply) {
-        //          if (!err) {
-
-        //            console.log("====> render_image get");
-
-        //            // reply is JSON string
-        //            var jsonJpeg = JSON.parse(reply)
-
-        //            var uri = generateDataURI('image/jpeg', jsonJpeg['jpegdata']);
-        //            socket.emit('render_data', uri);
-        //          }
-        //        });
-
-        //      }
-        //    });
-        //  }
-        //});
-      }
-    });
+    // comment out checkWithClang to avoid checking
+    //checkWithClang(sessionID, shaderID, socket, param['code'], function() {
+      renderWithCustomShader(sessionID, shaderID, socket, sessionToSocketTable, param['code']);
+    //});
   });
 
   socket.on('error', function(err) {
@@ -557,24 +341,17 @@ io.sockets.on('connection', function (socket) {
       console.log('i = ' + i);
     }
   });
-
 });
-
-//app.listen(port);
 
 console.log("port:" + port);
 
-function handler (req, res) {
-  //console.log(req.url)
+function handler(req, res) {
   var filename = req.url
   var tmp = req.url.split('.');
   var type = tmp[tmp.length-1];
-  //console.log(filename)
-  //console.log(type)
   if (req.url.match(/^\/(\d+)/)) {
     var re = req.url.match(/^\/(\d+)/);
     var num = parseInt(re[1]);
-
 
     console.log("instance: " + num);
     filename = '/index.html'
@@ -602,7 +379,6 @@ function handler (req, res) {
         res.writeHead(200, {'Content-Type': 'text/html'});
         break;
       case 'js':
-        //console.log('js:' + req.url)
         res.writeHead(200, {'Content-Type': 'text/javascript'});
         break;
       case 'css':

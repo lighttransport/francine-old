@@ -16,6 +16,7 @@ import (
 
 const (
 	redisMaxIdle = 5
+	verbose      = true
 )
 
 func getEtcdValue(etcdHost, key string) (string, error) {
@@ -155,14 +156,14 @@ func main() {
 
 	workers := make(map[string]time.Time)
 
+	redisUrl, err := getEtcdValue(etcdHost, "redis-server")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	redisPool := redis.NewPool(
 		func() (redis.Conn, error) {
-			redisServer, err := getEtcdValue(etcdHost, "redis-server")
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			return redis.Dial("tcp", redisServer)
+			return redis.Dial("tcp", redisUrl)
 		}, redisMaxIdle)
 	defer redisPool.Close()
 
@@ -170,7 +171,7 @@ func main() {
 
 	for {
 		redisConn := redisPool.Get()
-		resp, err := redisConn.Do("BLPOP", "cmd:lte-master", 1)
+		resp, err := redisConn.Do("BLPOP", "cmd:lte-master", 0)
 		if resp != nil {
 			popped := string(resp.([]interface{})[1].([]byte))
 			split := strings.Split(popped, ":")
@@ -189,8 +190,7 @@ func main() {
 
 		if err != nil {
 			redisConn.Close()
-			log.Printf("%s; failed, wait 30 seconds and retry...\n", err.Error())
-			time.Sleep(30 * time.Second)
+			log.Fatalf("%s; failed; exit\n", err.Error())
 		}
 
 		redisConn.Close()
