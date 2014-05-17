@@ -15,6 +15,32 @@ import (
 	"time"
 )
 
+/**
+ * @apiDefinePermission LTE rights needed.
+ * Optionally you can write here further Informations about the permission.
+ *
+ * An "apiDefinePermission"-block can have an "apiVersion", so you can attach the block to a specific version.
+ *
+ * @apiVersion 0.9.0
+ */
+
+/**
+ * @api {post} /sessions Create new session
+ * @apiVersion 0.9.0
+ * @apiName NewSession
+ * @apiGroup Render
+ *
+ * @apiParam {InputJSON} Input JSON scene filename.
+ *
+ * @apiSuccess {String} SessionId Session ID.
+ *
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *     {
+ *       "SessionId": "XXXXXXXX"
+ *     }
+ *
+ */
 func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) {
 	if verbose {
 		log.Println("[MASTER] new session start")
@@ -91,6 +117,28 @@ func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Poo
 	return
 }
 
+
+/**
+ * @api {put} /sessions/:sessionId/resources/:resourceName Add or update resource
+ * @apiVersion 0.9.0
+ * @apiName EditResource
+ * @apiGroup Render
+ *
+ * @apiParam {binary} Input binary data. Saved as resourceName in the server.
+ *
+ * @apiSuccess {String} Status "OK" if success.
+ * @apiSuccess {String} Name Filename of resource data.
+ * @apiSuccess {String} Hash SHA256 hash value of resource data.
+ *
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *     {
+ *       "Status": "OK",
+ *       "Name"  : "teapot.mesh",
+ *       "Hash"  : "5968ad5c2a58c6ef057fb16387b4f02c0c297559043ed54e68432fffd01eb540",
+ *     }
+ *
+ */
 func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session, resource string) {
 	conn := redisPool.Get()
 	defer conn.Close()
@@ -167,6 +215,27 @@ type LteAck struct {
 	Log    string
 }
 
+
+/**
+ * @api {post} /sessions/:sessionId/renders Run rendering
+ * @apiVersion 0.9.0
+ * @apiName NewRender
+ * @apiGroup Render
+ *
+ * @apiDescription Run rendering and wait until the rendering finishes. This API is blocking operation.
+ *
+ * @apiSuccess {Binary} JPEG file(binary stream).
+ * @apiError {String} Status Currently always "LinkError".
+ * @apiError {String} Log Detailed error log.
+ *
+ * @apiErrorExample Error-Response:
+ *     HTTP/1.1 200 OK
+ *     {
+ *       "Status": "LinkError",
+ *       "Log"   : "File not found: teapot.json"
+ *     }
+ *
+ */
 func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string) {
 	conn := redisPool.Get()
 	defer conn.Close()
