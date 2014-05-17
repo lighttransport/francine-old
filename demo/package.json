@@ -4,17 +4,15 @@
   , "private": true
   , "dependencies": {
       "socket.io": ">=0.9.16"
-    , "redback": "*"
     , "passport": "*"
     , "passport-oauth": "*"
     , "mongoose": "*"
     , "connect": "*"
-    , "connect-redis": "1.4.7"
     , "express": "3.x"
     , "cookie": "*"
     , "q": "*"
     , "forever": "*"
     , "shelljs": "*"
-    , "redis": "*"
+    , "request": "*"
   }
 }

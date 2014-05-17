@@ -25,4 +25,5 @@ cd /home/vagrant/etcd && GOPATH=/home/vagrant/workspace ./build
 sudo cp /home/vagrant/etcd/bin/etcd /usr/local/bin/etcd
 SCRIPT
 
+  config.vm.network "forwarded_port", guest: 7000, host: 7000, protocol: 'tcp'
 end

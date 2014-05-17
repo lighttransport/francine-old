@@ -16,8 +16,15 @@ import (
 )
 
 func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) {
+	if verbose {
+		log.Println("[MASTER] new session start")
+	}
 	conn := redisPool.Get()
 	defer conn.Close()
+
+	if verbose {
+		log.Println("[MASTER] redis connected")
+	}
 
 	var requestJson struct {
 		InputJson string
@@ -33,11 +40,11 @@ func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Poo
 		}
 	}
 
-	conn.Send("MULTI")
-	conn.Send("SETNX", "lte-counter", 1)
-	conn.Send("GET", "lte-counter")
-	conn.Send("INCR", "lte-counter")
-	redisResp, err := conn.Do("EXEC")
+	if verbose {
+		log.Println("[MASTER] request read and parsed")
+	}
+
+	redisResp, err := conn.Do("INCR", "lte-counter")
 	if err != nil {
 		raiseHttpError(w, err)
 		return
@@ -47,7 +54,11 @@ func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Poo
 		SessionId string
 	}
 
-	result.SessionId = string(redisResp.([]interface{})[1].([]byte))
+	if verbose {
+		log.Println("[MASTER] incremented redis lte-counter")
+	}
+
+	result.SessionId = strconv.FormatInt(redisResp.(int64), 10)
 
 	marshaled, err := json.Marshal(result)
 	if err != nil {
@@ -55,15 +66,27 @@ func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Poo
 		return
 	}
 
+	if verbose {
+		log.Println("[MASTER] result marshaled")
+	}
+
 	if _, err := conn.Do("SET", "session:"+result.SessionId+":input-json", requestJson.InputJson); err != nil {
 		raiseHttpError(w, err)
 		return
+	}
+
+	if verbose {
+		log.Println("[MASTER] wrote input-json to redis")
 	}
 
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")
 
 	w.Write(marshaled)
+
+	if verbose {
+		log.Println("[MASTER] sent all data, finished")
+	}
 
 	return
 }
@@ -79,6 +102,8 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 		raiseHttpError(w, err)
 		return
 	}
+
+	log.Printf("[MASTER] putting resource %s (%d bytes)\n", resource, len(data))
 
 	hashBytes := sha256.Sum256(data)
 	hash := hex.EncodeToString(hashBytes[:])
@@ -189,7 +214,7 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 	var lteAckBytes []byte
 
 	for {
-		resp, err := conn.Do("BLPOP", "lte-ack:"+message.RenderId, 1)
+		resp, err := conn.Do("BLPOP", "lte-ack:"+message.RenderId, 0)
 
 		if resp != nil {
 			lteAckBytes = resp.([]interface{})[1].([]byte)
@@ -228,7 +253,9 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 			return
 		}
 
-		log.Printf("[MASTER] received image, send back to the client... (%d bytes base64 to %d bytes)\n", len(imageDataJson.JpegData), len(imageData))
+		if verbose {
+			log.Printf("[MASTER] received image, send back to the client... (%d bytes base64 to %d bytes)\n", len(imageDataJson.JpegData), len(imageData))
+		}
 
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "image/jpeg")
@@ -247,11 +274,15 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) {
 	path := r.URL.Path
 
-	log.Println("[MASTER] rest request: " + path)
+	if verbose {
+		log.Println("[MASTER] rest request: " + path)
+	}
 
 	if regexp.MustCompile("^/sessions$").MatchString(path) {
 		if r.Method == "POST" {
-			log.Println("[MASTER] request dispatched")
+			if verbose {
+				log.Println("[MASTER] request dispatched")
+			}
 			restNewSession(w, r, redisPool)
 			return
 		}
@@ -259,7 +290,9 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 
 	if matched := regexp.MustCompile("^/sessions/(.+)/resources/(.+)$").FindStringSubmatch(path); matched != nil {
 		if r.Method == "PUT" {
-			log.Println("[MASTER] request dispatched")
+			if verbose {
+				log.Println("[MASTER] request dispatched")
+			}
 			restEditResource(w, r, redisPool, matched[1], matched[2])
 			return
 		}
@@ -267,7 +300,9 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 
 	if matched := regexp.MustCompile("^/sessions/(.+)/renders").FindStringSubmatch(path); matched != nil {
 		if r.Method == "POST" {
-			log.Println("[MASTER] request dispatched")
+			if verbose {
+				log.Println("[MASTER] request dispatched")
+			}
 			restNewRender(w, r, redisPool, matched[1])
 			return
 		}
@@ -279,10 +314,23 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 	return
 }
 
+func redisInit(redisPool *redis.Pool) {
+	log.Println("[MASTER] init redis...")
+	conn := redisPool.Get()
+	defer conn.Close()
+	if _, err := conn.Do("SETNX", "lte-counter", 0); err != nil {
+		log.Println(err)
+	}
+	log.Println("[MASTER] initialized")
+	return
+}
+
 func startRestServer(redisPool *redis.Pool) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		restHandler(w, r, redisPool)
 	})
+
+	go redisInit(redisPool)
 
 	http.ListenAndServe(":80", nil)
 }

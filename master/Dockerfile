@@ -15,9 +15,9 @@ ENV GOPATH /tmp/workspace
 RUN go get github.com/garyburd/redigo/redis
 RUN go get code.google.com/p/goauth2/oauth
 
-ADD master.go /tmp/workspace/src/master/master.go
-ADD rest.go /tmp/workspace/src/master/rest.go
 ADD cloud-config-worker.yaml /tmp/cloud-config-worker.yaml
 
+ADD master.go /tmp/workspace/src/master/master.go
+ADD rest.go /tmp/workspace/src/master/rest.go
 RUN cd /tmp/workspace/src/master/ && go build && cp master /bin/master
 

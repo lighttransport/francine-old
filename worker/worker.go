@@ -19,6 +19,7 @@ const (
 	redisMaxIdle    = 5
 	lteAckTtl       = 3600 // one hour
 	pingIntervalMin = 1    // minutes
+	verbose         = true
 )
 
 func getEtcdValue(etcdHost, key string) (string, error) {
@@ -64,16 +65,25 @@ type LteAck struct {
 }
 
 func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redisPort string) {
+	timeBeforeConn := time.Now()
+
 	conn := redisPool.Get()
 	defer conn.Close()
 
 	var message Message
+
+	timeBeforeResource := time.Now()
 
 	json.Unmarshal(msgBytes, &message)
 
 	resourceDir := "/tmp/renders/" + message.RenderId
 
 	if err := os.MkdirAll(resourceDir, 0755); err != nil {
+		log.Println(err)
+		return
+	}
+
+	if err := os.MkdirAll("/tmp/resources", 0755); err != nil {
 		log.Println(err)
 		return
 	}
@@ -85,76 +95,101 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 
 	// write the resource files
 	for _, resource := range message.Resources {
-		data, err := conn.Do("GET", "resource:"+resource.Hash)
-		if err != nil {
-			log.Println(err)
-			return
+		realPath := "/tmp/resources/" + resource.Hash
+		if _, err := os.Stat(realPath); os.IsNotExist(err) {
+			data, err := conn.Do("GET", "resource:"+resource.Hash)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
+			file, err := os.Create(realPath)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			file.Write(data.([]byte))
+			file.Close()
 		}
 
 		// TODO: it has obvious security problem! be aware!
-		absResourcePath := resourceDir + "/" + resource.Name
-		if err = os.MkdirAll(filepath.Dir(absResourcePath), 0755); err != nil {
+		symPath := resourceDir + "/" + resource.Name
+		if err := os.MkdirAll(filepath.Dir(symPath), 0755); err != nil {
 			log.Println(err)
 			return
 		}
 
-		file, err := os.Create(absResourcePath)
-		if err != nil {
+		if err := os.Symlink(realPath, symPath); err != nil {
 			log.Println(err)
 			return
 		}
-		file.Write(data.([]byte))
-		file.Close()
 	}
 
-	// do link check
-	linkCheckCmd := exec.Command(ltePath, "--linkcheck", "--session="+message.RenderId,
-		"--resource_basepath="+resourceDir,
-		"--redis_host="+redisHost, "--redis_port="+redisPort,
-		"-c", resourceDir+"/"+message.InputJson)
-	log.Printf("[WORKER] exec: %+v\n", linkCheckCmd.Args)
-	var linkCheckOutput bytes.Buffer
-	linkCheckCmd.Stderr = &linkCheckOutput
-	linkCheckCmd.Stdout = &linkCheckOutput
-
-	if err := linkCheckCmd.Run(); err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
-			sendLteAck(&LteAck{Status: "LinkError", Log: linkCheckOutput.String()}, message.RenderId, redisPool)
-			return
-		} else {
-			log.Fatalln(err)
+	timeBeforeRendering := time.Now()
+	/*
+		// do link check
+		linkCheckCmd := exec.Command(ltePath, "--linkcheck", "--session="+message.RenderId,
+			"--resource_basepath="+resourceDir,
+			"--redis_host="+redisHost, "--redis_port="+redisPort,
+			"-c", resourceDir+"/"+message.InputJson)
+		if verbose {
+			log.Printf("[WORKER] exec: %+v\n", linkCheckCmd.Args)
 		}
-	}
+		var linkCheckOutput bytes.Buffer
+		linkCheckCmd.Stderr = &linkCheckOutput
+		linkCheckCmd.Stdout = &linkCheckOutput
 
+		if err := linkCheckCmd.Run(); err != nil {
+			if _, ok := err.(*exec.ExitError); ok {
+				sendLteAck(&LteAck{Status: "LinkError", Log: linkCheckOutput.String()}, message.RenderId, redisPool)
+				return
+			} else {
+				log.Fatalln(err)
+			}
+		}
+	*/
 	rendererCmd := exec.Command(ltePath, "--session="+message.RenderId,
 		"--resource_basepath="+resourceDir,
 		"--redis_host="+redisHost, "--redis_port="+redisPort,
 		resourceDir+"/"+message.InputJson)
-	var rendererStderr bytes.Buffer
-	var rendererStdout bytes.Buffer
-	rendererCmd.Stdout = &rendererStdout
-	rendererCmd.Stderr = &rendererStderr
+	var rendererOutput bytes.Buffer
+	rendererCmd.Stdout = &rendererOutput
+	rendererCmd.Stderr = &rendererOutput
 
 	rendererErr := rendererCmd.Run()
 
-	if rendererStdout.Len() > 0 {
-		log.Println("lte:stdout: " + rendererStdout.String())
-	}
-	if rendererStderr.Len() > 0 {
-		log.Println("lte:stderr: " + rendererStderr.String())
+	if verbose {
+		log.Println("[WORKER] lte: " + rendererOutput.String())
 	}
 
 	if rendererErr != nil {
-		log.Println(rendererErr)
+		if _, ok := rendererErr.(*exec.ExitError); ok {
+			sendLteAck(&LteAck{Status: "LinkError", Log: rendererOutput.String()}, message.RenderId, conn)
+		} else {
+			log.Println(rendererErr)
+		}
 	}
 
-	sendLteAck(&LteAck{Status: "Ok"}, message.RenderId, redisPool)
+	timeAfterEverything := time.Now()
+
+	sendLteAck(&LteAck{Status: "Ok"}, message.RenderId, conn)
+
+	if err := os.RemoveAll(resourceDir); err != nil {
+		log.Println(err)
+		return
+	}
+
+	if verbose {
+		log.Printf("[WORKER] conn: %d ms, pre: %d ms, render: %d ms",
+			timeBeforeResource.Sub(timeBeforeConn).Nanoseconds()/1000/1000,
+			timeBeforeRendering.Sub(timeBeforeResource).Nanoseconds()/1000/1000,
+			timeAfterEverything.Sub(timeBeforeRendering).Nanoseconds()/1000/1000)
+	}
+
+	return
 }
 
-func sendLteAck(data *LteAck, renderId string, redisPool *redis.Pool) {
-	conn := redisPool.Get()
-	defer conn.Close()
-
+func sendLteAck(data *LteAck, renderId string, conn redis.Conn) {
 	key := "lte-ack:" + renderId
 	strData, _ := json.Marshal(data)
 
@@ -169,7 +204,9 @@ func sendLteAck(data *LteAck, renderId string, redisPool *redis.Pool) {
 		log.Println(err)
 	}
 
-	log.Println("[WORKER] lte-ack end with " + data.Status)
+	if verbose {
+		log.Println("[WORKER] lte-ack end with " + data.Status)
+	}
 }
 
 func sendPings(workerName string, redisPool *redis.Pool) {
@@ -213,7 +250,7 @@ func main() {
 	for {
 		redisConn := redisPool.Get()
 
-		resp, err := redisConn.Do("BLPOP", "render-queue", cmdQueueName, 1)
+		resp, err := redisConn.Do("BLPOP", "render-queue", cmdQueueName, 0)
 
 		if resp != nil {
 			listName := string(resp.([]interface{})[0].([]byte))

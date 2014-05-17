@@ -49,7 +49,7 @@ coreos:
         Requires=registry.service etcd.service redis.service ltemaster.service
         [Service]
         ExecStartPre=/usr/bin/docker pull 127.0.0.1:5000/lte_demo
-        ExecStart=/usr/bin/docker run -p 7000:7000 -e ETCD_HOST=172.17.42.1:4001 -e REDIS_HOST=$private_ipv4 127.0.0.1:5000/lte_demo /usr/bin/nodejs /tmp/server/server.js
+        ExecStart=/usr/bin/docker run -p 7000:7000 -e ETCD_HOST=172.17.42.1:4001 -e REST_HOST=$private_ipv4 127.0.0.1:5000/lte_demo /usr/bin/nodejs /tmp/server/server.js
         Restart=always
         RestartSec=30
         [Install]
