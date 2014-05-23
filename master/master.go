@@ -63,11 +63,15 @@ func postRequest(url string, data interface{}, client *http.Client) (string, err
 }
 
 func createWorkerInstance(etcdHost string) {
-	tokenUrl, err := getEtcdValue(etcdHost, "token-url")
+	tokenUrl, err := getEtcdValue(etcdHost, "lte-worker-url")
 	if err != nil {
 		log.Fatal(err)
 	}
 	gceOAuthToken, err := getEtcdValue(etcdHost, "gce-oauth-token")
+	if err != nil {
+		log.Fatal(err)
+	}
+	redisServer, err := getEtcdValue(etcdHost, "redis-server")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -83,7 +87,8 @@ func createWorkerInstance(etcdHost string) {
 	}
 
 	cloudConfig = strings.Replace(cloudConfig, "<hostname>", instanceName, -1)
-	cloudConfig = strings.Replace(cloudConfig, "<token_url>", tokenUrl, -1)
+	cloudConfig = strings.Replace(cloudConfig, "<lte_worker_url>", tokenUrl, -1)
+	cloudConfig = strings.Replace(cloudConfig, "<redis_server>", redisServer, -1)
 
 	decoded, err := base64.StdEncoding.DecodeString(gceOAuthToken)
 	if err != nil {
@@ -150,18 +155,23 @@ func createWorkerInstance(etcdHost string) {
 }
 
 func main() {
-	etcdHost := os.Getenv("ETCD_HOST")
-
-	if etcdHost == "" {
-		log.Println("please set ETCD_HOST")
-		os.Exit(1)
-	}
-
 	workers := make(map[string]time.Time)
 
-	redisUrl, err := getEtcdValue(etcdHost, "redis-server")
-	if err != nil {
-		log.Fatal(err)
+	etcdHost := os.Getenv("ETCD_HOST")
+
+	redisUrl := os.Getenv("REDIS_HOST")
+	if redisUrl == "" {
+
+		if etcdHost == "" {
+			log.Println("please set ETCD_HOST")
+			os.Exit(1)
+		}
+
+		var err error
+		redisUrl, err = getEtcdValue(etcdHost, "redis-server")
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	redisPool := redis.NewPool(
@@ -180,6 +190,10 @@ func main() {
 			split := strings.Split(popped, ":")
 			switch split[0] {
 			case "create":
+				if etcdHost == "" {
+					log.Println("please set ETCD_HOST")
+					os.Exit(1)
+				}
 				go createWorkerInstance(etcdHost)
 			case "ping":
 				workers[split[1]] = time.Now()

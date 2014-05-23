@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -121,9 +122,12 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 			}
 		}
 	*/
+	parsed, _ := strconv.ParseInt(message.RenderId, 10, 64)
+	seed := strconv.Itoa(int(parsed & (1<<30 - 1)))
 	rendererCmd := exec.Command(ltePath, "--session="+message.RenderId,
 		"--resource_basepath="+resourceDir,
 		"--redis_host="+redisHost, "--redis_port="+redisPort,
+		"--seed="+seed,
 		resourceDir+"/"+message.InputJson)
 	var rendererOutput bytes.Buffer
 	rendererCmd.Stdout = &rendererOutput

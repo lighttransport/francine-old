@@ -370,14 +370,13 @@ const renderTimes = 4
 func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string) {
 	// TODO: increment reference count of resources while renering is running
 
-	message, err := generateRenderMessage(session, redisPool)
-	if err != nil {
-		raiseHttpError(w, err)
-	}
-
 	res := make(chan Result, renderTimes)
 
 	for i := 0; i < renderTimes; i++ {
+		message, err := generateRenderMessage(session, redisPool)
+		if err != nil {
+			raiseHttpError(w, err)
+		}
 		go requestRender(message, redisPool, res)
 	}
 
@@ -394,6 +393,7 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 			w.WriteHeader(http.StatusOK)
 			w.Header().Set("Content-Type", "application/json")
 			w.Write(received.Ack)
+			return
 		}
 
 		buf := bytes.NewBuffer(received.Image)
