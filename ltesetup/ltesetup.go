@@ -48,7 +48,7 @@ func AddInstance(config *InstConfig) error {
 }
 
 func DeleteInstance(instance string) error {
-	cmd := exec.Command("gcutil", "deleteinstance", instance)
+	cmd := exec.Command("gcutil", "--project", "gcp-samples", "deleteinstance", instance)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -56,14 +56,14 @@ func DeleteInstance(instance string) error {
 }
 
 func SendCommand(instance, command string) error {
-	cmd := exec.Command("gcutil", "ssh", instance, command)
+	cmd := exec.Command("gcutil", "--project", "gcp-samples", "ssh", instance, command)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 func SendFile(instance, from, to string) error {
-	cmd := exec.Command("gcutil", "push", instance, from, to)
+	cmd := exec.Command("gcutil", "--project", "gcp-samples", "push", instance, from, to)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	return cmd.Run()
@@ -150,7 +150,7 @@ func UpdateImages(masterInstance string, imageName string) error {
 	if imageName != "" {
 		images = []string{imageName}
 	}
-	ssh := exec.Command("gcutil", "ssh", "--ssh_arg", "-L 5000:localhost:5000", "--ssh_arg", "-n", "--ssh_arg", "-t", "--ssh_arg", "-t", masterInstance)
+	ssh := exec.Command("gcutil", "--project", "gcp-samples", "ssh", "--ssh_arg", "-L 5000:localhost:5000", "--ssh_arg", "-n", "--ssh_arg", "-t", "--ssh_arg", "-t", masterInstance)
 	ssh.Stdout = os.Stdout
 	ssh.Stderr = os.Stderr
 	if err := ssh.Start(); err != nil {

@@ -17,6 +17,7 @@ sudo -E docker run -p 6379:6379 dockerfile/redis &
 sleep 5
 sudo -E docker run -p 80:80 -e ETCD_HOST=$IP_ADDR:4001 lighttransport/lte_master /bin/master &
 sleep 5
-sudo -E docker run -e ETCD_HOST=$IP_ADDR:4001 -e WORKER_NAME=lte-worker lighttransport/lte_worker /bin/worker
-#sudo -E docker run -p 7000:7000 -e ETCD_HOST=172.17.42.1:4001 -e REST_HOST=$IP_ADDR lighttransport/lte_demo /usr/bin/nodejs /tmp/server/server.js
+sudo -E docker run -e ETCD_HOST=$IP_ADDR:4001 -e WORKER_NAME=lte-worker lighttransport/lte_worker /bin/worker &
+sleep 30
+sudo -E docker run -p 7000:7000 -e ETCD_HOST=172.17.42.1:4001 -e REST_HOST=$IP_ADDR lighttransport/lte_demo /usr/bin/nodejs /tmp/server/server.js
 

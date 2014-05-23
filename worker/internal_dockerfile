@@ -7,6 +7,4 @@ ADD libc.so.6 /lib64/
 ADD libpthread.so.0 /lib64/
 ADD lte /bin/lte
 ADD worker /bin/worker
-ADD scene /home/default/scene
-ADD shader /home/default/shader
 ENV LD_LIBRARY_PATH /lib64

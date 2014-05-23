@@ -22,9 +22,3 @@ cp /lib64/libdl.so.2 docker_dist
 cp /lib64/librt.so.1 docker_dist
 cp /lib64/libc.so.6  docker_dist
 cp /lib64/libpthread.so.0 docker_dist
-
-# generate dummy directories
-mkdir docker_dist/shader
-echo "dummy" > docker_dist/shader/dummy
-mkdir docker_dist/scene
-echo "dummy" > docker_dist/scene/dummy
