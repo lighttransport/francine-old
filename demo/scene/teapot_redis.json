@@ -12,7 +12,7 @@
     "lookat" : [0.0, 0.0, 0.0],
     "up" : [0.0, 1.0, 0.0],
     "fov" : 45.0,
-    "subsamples" : 2,
+    "subsamples" : 1,
     "window_width" : 256,
     "window_height" : 256,
     "sunsky_timeofday" : 18.75,

@@ -258,7 +258,8 @@ func main() {
 
 			switch listName {
 			case "render-queue":
-				go kickRenderer(popped, redisPool, redisHost, redisPort)
+				//go kickRenderer(popped, redisPool, redisHost, redisPort)
+				kickRenderer(popped, redisPool, redisHost, redisPort)
 			case cmdQueueName:
 				switch string(popped) {
 				case "stop":
