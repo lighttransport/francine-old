@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/garyburd/redigo/redis"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,31 +19,6 @@ const (
 	pingIntervalMin = 1    // minutes
 	verbose         = true
 )
-
-func getEtcdValue(etcdHost, key string) (string, error) {
-	resp, err := http.Get("http://" + etcdHost + "/v2/keys/" + key)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var parsed struct {
-		Node struct {
-			Value string `json:"value"`
-		} `json:"node"`
-	}
-
-	json.Unmarshal(body, &parsed)
-
-	log.Println("[WORKER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
-
-	return parsed.Node.Value, nil
-}
 
 type Resource struct {
 	Name string
@@ -220,19 +193,14 @@ func sendPings(workerName string, redisPool *redis.Pool) {
 }
 
 func main() {
-	etcdHost := os.Getenv("ETCD_HOST")
-	if etcdHost == "" {
-		log.Fatalln("please set ETCD_HOST")
-	}
-
 	workerName := os.Getenv("WORKER_NAME")
 	if workerName == "" {
 		log.Fatalln("please set WORKER_NAME")
 	}
 
-	redisUrl, err := getEtcdValue(etcdHost, "redis-server")
-	if err != nil {
-		log.Fatalln(err.Error())
+	redisUrl := os.Getenv("REDIS_HOST")
+	if redisUrl == "" {
+		log.Fatalln("please set REDIS_HOST")
 	}
 	redisUrlSplit := strings.Split(redisUrl, ":")
 	redisHost, redisPort := redisUrlSplit[0], redisUrlSplit[1]

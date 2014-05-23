@@ -7,11 +7,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
-	"net/http"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 )
 
@@ -78,41 +75,12 @@ func CheckFiles(files []string) error {
 	return nil
 }
 
-func GetToken() (string, error) {
-	resp, err := http.Get("https://discovery.etcd.io/new")
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
-}
-
 func CreateMaster(instance string) error {
 	reqs := []string{"cloud-config-master.yaml"}
 	var err error
 	if err = CheckFiles(reqs); err != nil {
 		return err
 	}
-
-	prev, err := ioutil.ReadFile("cloud-config-master.yaml")
-	if err != nil {
-		return err
-	}
-
-	token, err := GetToken()
-	if err != nil {
-		return err
-	}
-
-	if err = ioutil.WriteFile("cloud-config-master.yaml",
-		[]byte(strings.Replace(string(prev), "<token_url>", token, -1)), 0644); err != nil {
-		return err
-	}
-	defer ioutil.WriteFile("cloud-config-master.yaml", prev, 0644)
 
 	if err = AddInstance(&InstConfig{
 		name:        instance,

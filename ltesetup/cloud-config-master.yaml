@@ -4,7 +4,6 @@ hostname: lte-master
 coreos:
   etcd:
     name: lte-master
-    discovery: <token_url>
     addr: $private_ipv4:4001
     peer-addr: $private_ipv4:7001
   units:
@@ -31,10 +30,9 @@ coreos:
         After=registry.service etcd.service redis.service
         Requires=registry.service etcd.service redis.service
         [Service]
-        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /token-url <token_url>; exit 0"
         ExecStartPre=/usr/bin/docker pull 127.0.0.1:5000/lte_master
         ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /redis-server $private_ipv4:6379; exit 0"
-        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /lte-bin-url $private_ipv4:5000/lte_worker; exit 0"
+        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /lte-worker-url $private_ipv4:5000/lte_worker; exit 0"
         ExecStart=/usr/bin/docker run -p 80:80 -e ETCD_HOST=172.17.42.1:4001 127.0.0.1:5000/lte_master /bin/master
         Restart=always
         RestartSec=30

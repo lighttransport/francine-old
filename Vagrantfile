@@ -20,9 +20,6 @@ echo "export PATH=\$PATH:/usr/local/go/bin" >> .bashrc
 PATH=$PATH:/usr/local/go/bin
 GOPATH=/home/vagrant/workspace go get github.com/garyburd/redigo/redis
 GOPATH=/home/vagrant/workspace go get code.google.com/p/goauth2/oauth
-cd /home/vagrant && git clone https://github.com/coreos/etcd
-cd /home/vagrant/etcd && GOPATH=/home/vagrant/workspace ./build
-sudo cp /home/vagrant/etcd/bin/etcd /usr/local/bin/etcd
 SCRIPT
 
   config.vm.network "forwarded_port", guest: 7000, host: 7000, protocol: 'tcp'

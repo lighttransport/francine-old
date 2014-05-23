@@ -2,25 +2,16 @@
 hostname: <hostname>
 
 coreos:
-  etcd:
-    name: <hostname>
-    discovery: <token_url>
-    addr: $private_ipv4:4001
-    peer-addr: $private_ipv4:7001
   units:
-    - name: etcd.service
-      command: start
     - name: lteworker.service
       command: start
       content: |
         [Unit]
         Description=LTE Worker Container
-        After=etcd.service
-        Requires=etcd.service
 
         [Service]
-        ExecStartPre=/bin/sh -xc "/usr/bin/docker pull `/usr/bin/etcdctl get /lte-bin-url`"
-        ExecStart=/bin/sh -xc "/usr/bin/docker run -e ETCD_HOST=172.17.42.1:4001 -e WORKER_NAME=<hostname> -w /home/default `/usr/bin/etcdctl get /lte-bin-url` /bin/worker"
+        ExecStartPre=/bin/sh -xc "/usr/bin/docker pull <lte_worker_url>"
+        ExecStart=/bin/sh -xc "/usr/bin/docker run -e REDIS_HOST=<redis_server> -e WORKER_NAME=<hostname> -w /home/default <lte_worker_url> /bin/worker"
         Restart=always
         RestartSec=30
 
