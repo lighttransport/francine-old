@@ -32,7 +32,8 @@ func AddInstance(config *InstConfig) error {
 		`--network=`+config.network,
 		`--external_ip_address=`+config.ipType,
 		`--service_account_scopes=https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/compute,https://www.googleapis.com/auth/devstorage.full_control`,
-		`--image=https://www.googleapis.com/compute/v1/projects/gcp-samples/global/images/coreos-v282-0-0`,
+		//`--image=https://www.googleapis.com/compute/v1/projects/gcp-samples/global/images/coreos-v282-0-0`,
+		`--image=projects/coreos-cloud/global/images/coreos-alpha-324-1-0-v20140522`,
 		`--metadata_from_file=user-data:`+config.cloudConfig,
 		`--boot_disk_size_gb=15`,
 		`--persistent_boot_disk=true`,
@@ -84,7 +85,8 @@ func CreateMaster(instance string) error {
 
 	if err = AddInstance(&InstConfig{
 		name:        instance,
-		zone:        "us-central1-a",
+		//zone:        "us-central1-a",
+		zone:        "asia-east1-a",
 		machineType: "n1-standard-1",
 		network:     "lte-cluster",
 		ipType:      "ephemeral",
@@ -118,7 +120,7 @@ func UpdateImages(masterInstance string, imageName string) error {
 	if imageName != "" {
 		images = []string{imageName}
 	}
-	ssh := exec.Command("gcutil", "--project", "gcp-samples", "ssh", "--ssh_arg", "-L 5000:localhost:5000", "--ssh_arg", "-n", "--ssh_arg", "-t", "--ssh_arg", "-t", masterInstance)
+	ssh := exec.Command("gcutil", "--project", "gcp-samples", "ssh", "--ssh_arg", "-L 5001:localhost:5000", "--ssh_arg", "-n", "--ssh_arg", "-t", "--ssh_arg", "-t", masterInstance)
 	ssh.Stdout = os.Stdout
 	ssh.Stderr = os.Stderr
 	if err := ssh.Start(); err != nil {
@@ -129,14 +131,14 @@ func UpdateImages(masterInstance string, imageName string) error {
 	time.Sleep(15 * time.Second)
 
 	for _, image := range images {
-		cmd := exec.Command("sudo", "docker", "tag", "lighttransport/"+image, "localhost:5000/"+image)
+		cmd := exec.Command("sudo", "docker", "tag", "lighttransport/"+image, "localhost:5001/"+image)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
 			return err
 		}
-		cmd = exec.Command("sudo", "docker", "push", "localhost:5000/"+image)
+		cmd = exec.Command("sudo", "docker", "push", "localhost:5001/"+image)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
