@@ -24,6 +24,7 @@ Renderer backend for massive server environment.
 
 ### Create master GCE instance
     cd ltesetup
+    go get # optional
     go build
     ./ltesetup create_master
 
