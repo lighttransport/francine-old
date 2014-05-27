@@ -113,6 +113,30 @@ func RestartDemo(masterInstance string) error {
 	return SendCommand(masterInstance, "sudo systemctl restart ltedemo.service")
 }
 
+func DeleteWorkers() error {
+	lst := exec.Command("gcutil", "listinstances", "--format", "names", "--project", "gcp-samples", "--filter=name eq '.*lte-worker.*'")
+	delinst := exec.Command("xargs", "gcutil", "deleteinstance", "--force", "--delete_boot_pd"); // --force option needs also specify delete persistent disk option(--[no]delete_boot_pd)
+
+    delinst.Stdin, _ = lst.StdoutPipe()
+    lst.Stderr = os.Stderr
+    delinst.Stdout = os.Stdout
+    delinst.Stderr = os.Stderr
+    if err := delinst.Start(); err != nil {
+		return err
+    }
+
+    if err := lst.Run(); err != nil {
+		return err
+	}
+
+	if err := delinst.Wait(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+
 func UpdateImages(masterInstance string, imageName string) error {
 	images := []string{"lte_master", "lte_worker", "lte_demo"}
 	if imageName != "" {
@@ -129,14 +153,14 @@ func UpdateImages(masterInstance string, imageName string) error {
 	time.Sleep(15 * time.Second)
 
 	for _, image := range images {
-		cmd := exec.Command("sudo", "docker", "tag", "lighttransport/"+image, "localhost:5000/"+image)
+		cmd := exec.Command("docker", "tag", "lighttransport/"+image, "localhost:5000/"+image)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
 			return err
 		}
-		cmd = exec.Command("sudo", "docker", "push", "localhost:5000/"+image)
+		cmd = exec.Command("docker", "push", "localhost:5000/"+image)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
@@ -200,6 +224,7 @@ func main() {
 	restart_workers : Restart worker containers
 	restart_master : Restart the master container
 	restart_demo : Restart the demo container
+	delete_workers : Delete all worker instances in GCE
 
 How to Setup:
 	./ltesetup create_master
@@ -253,6 +278,8 @@ How to Setup:
 		err = RestartMaster("lte-master")
 	case "restart_demo":
 		err = RestartDemo("lte-master")
+	case "delete_workers":
+		err = DeleteWorkers()
 	default:
 		fmt.Fprintf(os.Stderr, "%s: unknown command %s\n", os.Args[0], commandName)
 	}
