@@ -1,0 +1,1 @@
+- Try to use replica pool to create multiple workers at a time: https://developers.google.com/compute/docs/replica-pool/
