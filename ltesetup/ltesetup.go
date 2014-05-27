@@ -146,6 +146,14 @@ func ListWorkers() error {
 	return cmd.Run()
 }
 
+func ShowMasterIP() error {
+	cmd := exec.Command("gcutil", "listinstances", "--format", "csv", "--project", "gcp-samples", "--column", "external-ip", "--filter=name eq 'lte-master'")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
 
 func UpdateImages(masterInstance string, imageName string) error {
 	images := []string{"lte_master", "lte_worker", "lte_demo"}
@@ -232,9 +240,10 @@ func main() {
 	create_worker : Create a worker instance in GCE
 	auth <client id> <client secret> : Register OAuth token for worker instance creation
 	restart_workers : Restart worker containers
-	restart_master : Restart the master container
-	restart_demo : Restart the demo container
-	delete_workers : Delete all worker instances in GCE
+	restart_master  : Restart the master container
+	restart_demo    : Restart the demo container
+	delete_workers  : Delete all worker instances in GCE
+	show_master_ip  : Show external IP addr of the master instance in GCE
 
 How to Setup:
 	./ltesetup create_master
@@ -292,6 +301,8 @@ How to Setup:
 		err = DeleteWorkers()
 	case "list_workers":
 		err = ListWorkers()
+	case "show_master_ip":
+		err = ShowMasterIP()
 	default:
 		fmt.Fprintf(os.Stderr, "%s: unknown command %s\n", os.Args[0], commandName)
 	}
