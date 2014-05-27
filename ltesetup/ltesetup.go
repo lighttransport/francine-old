@@ -138,6 +138,14 @@ func DeleteWorkers() error {
 	return nil
 }
 
+func ListWorkers() error {
+	cmd := exec.Command("gcutil", "listinstances", "--format", "names", "--project", "gcp-samples", "--filter=name eq '.*lte-worker.*'")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
 
 func UpdateImages(masterInstance string, imageName string) error {
 	images := []string{"lte_master", "lte_worker", "lte_demo"}
@@ -282,6 +290,8 @@ How to Setup:
 		err = RestartDemo("lte-master")
 	case "delete_workers":
 		err = DeleteWorkers()
+	case "list_workers":
+		err = ListWorkers()
 	default:
 		fmt.Fprintf(os.Stderr, "%s: unknown command %s\n", os.Args[0], commandName)
 	}
