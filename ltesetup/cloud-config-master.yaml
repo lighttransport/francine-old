@@ -1,4 +1,3 @@
-# use 5001(external), 5000(in the container) for private docker registory
 #cloud-config
 hostname: lte-master
 
@@ -18,6 +17,7 @@ coreos:
         After=docker.service
         Requires=docker.service
         [Service]
+        ExecStartPre=/usr/bin/sudo /bin/sh -xc "echo '127.0.0.1 localhost' >> /etc/hosts; exit 0"
         ExecStartPre=/usr/bin/mkdir -p /home/peryaudo/registry
         ExecStart=/usr/bin/docker run -p 5001:5000 -v /home/peryaudo/registry:/tmp/registry registry
 

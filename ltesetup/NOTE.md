@@ -1,1 +1,3 @@
 - Try to use replica pool to create multiple workers at a time: https://developers.google.com/compute/docs/replica-pool/
+- Use 5001(external) and 5000(in the container) for docker registory service
+- Need to add localhost entry in /etc/hosts otherwise golang(?) failed to lookup localhost in CoreOS.
