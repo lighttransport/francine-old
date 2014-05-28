@@ -160,7 +160,7 @@ func UpdateImages(masterInstance string, imageName string) error {
 	if imageName != "" {
 		images = []string{imageName}
 	}
-	ssh := exec.Command("gcutil", "--project", "gcp-samples", "ssh", "--ssh_arg", "-L 5001:localhost:5000", "--ssh_arg", "-n", "--ssh_arg", "-t", "--ssh_arg", "-t", masterInstance)
+	ssh := exec.Command("gcutil", "--project", "gcp-samples", "ssh", "--ssh_arg", "-L 5001:localhost:5001", "--ssh_arg", "-n", "--ssh_arg", "-t", "--ssh_arg", "-t", masterInstance)
 	ssh.Stdout = os.Stdout
 	ssh.Stderr = os.Stderr
 	if err := ssh.Start(); err != nil {
@@ -171,18 +171,23 @@ func UpdateImages(masterInstance string, imageName string) error {
 	time.Sleep(15 * time.Second)
 
 	for _, image := range images {
-		cmd := exec.Command("sudo", "docker", "tag", "lighttransport/"+image, "localhost:5001/"+image)
+		fmt.Println("francine:info\tmsg:updating image > "+image)
+		cmd := exec.Command("docker", "tag", "lighttransport/"+image, "localhost:5001/"+image)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
+			fmt.Println("francine:err\tmsg:docker tag failed")
+			ssh.Process.Kill(); // @todo err check
 			return err
 		}
-		cmd = exec.Command("sudo", "docker", "push", "localhost:5001/"+image)
+		cmd = exec.Command("docker", "push", "localhost:5001/"+image)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
+			fmt.Println("francine:err\tmsg:docker push failed")
+			ssh.Process.Kill(); // @todo err check
 			return err
 		}
 	}

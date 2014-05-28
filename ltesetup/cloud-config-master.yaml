@@ -1,3 +1,4 @@
+# use 5001(external), 5000(in the container) for private docker registory
 #cloud-config
 hostname: lte-master
 
@@ -18,7 +19,7 @@ coreos:
         Requires=docker.service
         [Service]
         ExecStartPre=/usr/bin/mkdir -p /home/peryaudo/registry
-        ExecStart=/usr/bin/docker run -p 5000:5000 -v /home/peryaudo/registry:/tmp/registry registry
+        ExecStart=/usr/bin/docker run -p 5001:5000 -v /home/peryaudo/registry:/tmp/registry registry
 
         [Install]
         WantedBy=multi-user.target
@@ -30,10 +31,10 @@ coreos:
         After=registry.service etcd.service redis.service
         Requires=registry.service etcd.service redis.service
         [Service]
-        ExecStartPre=/usr/bin/docker pull 127.0.0.1:5000/lte_master
+        ExecStartPre=/usr/bin/docker pull 127.0.0.1:5001/lte_master
         ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /redis-server $private_ipv4:6379; exit 0"
-        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /lte-worker-url $private_ipv4:5000/lte_worker; exit 0"
-        ExecStart=/usr/bin/docker run -p 80:80 -e ETCD_HOST=172.17.42.1:4001 127.0.0.1:5000/lte_master /bin/master
+        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /lte-worker-url $private_ipv4:5001/lte_worker; exit 0"
+        ExecStart=/usr/bin/docker run -p 80:80 -e ETCD_HOST=172.17.42.1:4001 127.0.0.1:5001/lte_master /bin/master
         Restart=always
         RestartSec=30
         [Install]
@@ -46,8 +47,8 @@ coreos:
         After=registry.service etcd.service redis.service ltemaster.service
         Requires=registry.service etcd.service redis.service ltemaster.service
         [Service]
-        ExecStartPre=/usr/bin/docker pull 127.0.0.1:5000/lte_demo
-        ExecStart=/usr/bin/docker run -p 7000:7000 -e ETCD_HOST=172.17.42.1:4001 -e REST_HOST=$private_ipv4 127.0.0.1:5000/lte_demo /usr/bin/nodejs /tmp/server/server.js
+        ExecStartPre=/usr/bin/docker pull 127.0.0.1:5001/lte_demo
+        ExecStart=/usr/bin/docker run -p 7000:7000 -e ETCD_HOST=172.17.42.1:4001 -e REST_HOST=$private_ipv4 127.0.0.1:5001/lte_demo /usr/bin/nodejs /tmp/server/server.js
         Restart=always
         RestartSec=30
         [Install]
