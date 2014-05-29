@@ -133,12 +133,14 @@ func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Poo
  * @apiSuccess {String} Status "OK" if success.
  * @apiSuccess {String} Name Filename of resource data.
  * @apiSuccess {String} Hash SHA256 hash value of resource data.
+ * @apiSuccess {Number} Size of resource data in bytes.
  *
  * @apiSuccessExample Success-Response:
  *     HTTP/1.1 200 OK
  *     {
  *       "Status": "OK",
  *       "Name"  : "teapot.mesh",
+ *       "Size"  : 1024,
  *       "Hash"  : "5968ad5c2a58c6ef057fb16387b4f02c0c297559043ed54e68432fffd01eb540",
  *     }
  *
@@ -175,11 +177,13 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 		Status string
 		Name   string
 		Hash   string
+		Size   int		// Up to 2GB
 	}
 
 	result.Status = "Ok"
 	result.Name = resource
 	result.Hash = hash
+	result.Size = len(data)
 
 	marshaled, err := json.Marshal(result)
 	if err != nil {
