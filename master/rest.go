@@ -15,6 +15,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"time"
@@ -369,9 +370,7 @@ func composeImage(dst *draw.Image, src image.Image, ratio int) {
  *
  */
 
-const renderTimes = 4
-
-func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string) {
+func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string, renderTimes int) {
 	// TODO: increment reference count of resources while renering is running
 
 	res := make(chan Result, renderTimes)
@@ -456,7 +455,27 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 			if verbose {
 				log.Println("[MASTER] request dispatched")
 			}
-			restNewRender(w, r, redisPool, matched[1])
+			m, _ := url.ParseQuery(r.URL.RawQuery)
+		
+			renderTimes := 4
+			if m["parallel"] != nil {
+				n, err := strconv.Atoi(m["parallel"][0])
+				if err != nil {
+					renderTimes = n
+
+					// clamp
+					if renderTimes < 1 {
+						renderTimes = 1
+					} else if renderTimes > 128 {
+						renderTimes = 128
+					}
+				}
+			}
+			if verbose {
+				log.Println("[MASTER] renderTimes = %d", renderTimes)
+			}
+
+			restNewRender(w, r, redisPool, matched[1], renderTimes)
 			return
 		}
 	}
