@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"time"
+	"strconv"
 )
 
 type InstConfig struct {
@@ -97,9 +98,12 @@ func CreateMaster(instance string) error {
 	return nil
 }
 
-func SendCreateWorker(masterInstance string) error {
-	return SendCommand(masterInstance,
-		"sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush cmd:lte-master create")
+func SendCreateWorker(masterInstance string, num int) error {
+	cmd := ""
+	for i := 0; i < num; i++ {
+		cmd += "sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush cmd:lte-master create\n"
+	}
+	return SendCommand(masterInstance, cmd)
 }
 
 func RestartWorkers(masterInstance string) error {
@@ -242,12 +246,13 @@ func main() {
 	create_master : Create the master instance in GCE
 	update_images : Update docker images
 	delete_master : Delete the master instance in GCE
-	create_worker : Create a worker instance in GCE
+	create_worker <N> : Create a worker instance in GCE(N workers if N was specified)
 	auth <client id> <client secret> : Register OAuth token for worker instance creation
 	restart_workers : Restart worker containers
 	restart_master  : Restart the master container
 	restart_demo    : Restart the demo container
 	delete_workers  : Delete all worker instances in GCE
+	list_workers    : List worker instances in GCE
 	show_master_ip  : Show external IP addr of the master instance in GCE
 
 How to Setup:
@@ -288,7 +293,19 @@ How to Setup:
 		}
 		err = UpdateImages("lte-master", imageName)
 	case "create_worker":
-		err = SendCreateWorker("lte-master")
+		num := 1
+		if len(flag.Args()) >= 2 {
+			num, err = strconv.Atoi(flag.Args()[1])
+			if err == nil {
+				if num < 1 {
+					num = 1;
+				} else if num > 16 {
+					num = 16;
+				}
+			}
+
+		}
+		err = SendCreateWorker("lte-master", num)
 	case "auth":
 		if flag.NArg() < 3 {
 			fmt.Fprintf(os.Stderr, "%s: too few arguments\n", os.Args[0])
