@@ -460,7 +460,7 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 			renderTimes := 4
 			if m["parallel"] != nil {
 				n, err := strconv.Atoi(m["parallel"][0])
-				if err != nil {
+				if err == nil {
 					renderTimes = n
 
 					// clamp
