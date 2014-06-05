@@ -122,10 +122,11 @@ func createWorkerInstance(etcdHost string) {
 			"zone":       "https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/" + zone,
 			"source":     "https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/" + zone + "/disks/" + instanceName}},
 		"networkInterfaces": []interface{}{map[string]interface{}{
-			"network": "https://www.googleapis.com/compute/v1/projects/gcp-samples/global/networks/lte-cluster",
-			"accessConfigs": []interface{}{map[string]string{
-				"name": "External NAT",
-				"type": "ONE_TO_ONE_NAT"}}}},
+			"network": "https://www.googleapis.com/compute/v1/projects/gcp-samples/global/networks/lte-cluster"}},
+			// NOTE: no accessConfigs[] = will have no external internet access
+			//"accessConfigs": []interface{}{map[string]string{
+			//	"name": "External NAT",
+			//	"type": "ONE_TO_ONE_NAT"}}}},
 		"metadata": map[string]interface{}{
 			"items": []interface{}{
 				map[string]string{
