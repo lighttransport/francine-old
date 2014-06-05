@@ -16,9 +16,37 @@ func clamp(f float32) uint16 {
 	if i < 0 {
 		i = 0
 	}
-	fmt.Println(f)
+	if (i > 65535) {
+		i = 65535
+	}
 
 	return uint16(i)
+}
+
+func accumulate(dst []float32, src image.Image) {
+	inBounds := src.Bounds()
+
+	var w = inBounds.Dx()
+
+	for y := inBounds.Min.Y; y < inBounds.Max.Y; y++ {
+		for x := inBounds.Min.X; x < inBounds.Max.X; x++ {
+			r, g, b, a := src.At(x, y).RGBA()
+			dst[4*(y*w+x)+0] += float32(r) / float32(65535.0)
+			dst[4*(y*w+x)+1] += float32(g) / float32(65535.0)
+			dst[4*(y*w+x)+2] += float32(b) / float32(65535.0)
+			dst[4*(y*w+x)+3] += float32(a) / float32(65535.0)
+		}
+	}
+}
+
+func divBy(dst []float32, n float32) {
+
+	invN := 1.0 / n
+
+	for i := 0; i < len(dst); i++ {
+		dst[i] *= invN
+	}
+
 }
 
 func main() {
@@ -45,23 +73,21 @@ func main() {
 	len := inBounds.Dx() * inBounds.Dy()
 	fmt.Println(len)
 	var fimg = make([]float32, len * 4)
-
-	var w = inBounds.Dx()
-	//var h = inBounds.Dy()
-
-	for y := inBounds.Min.Y; y < inBounds.Max.Y; y++ {
-		for x := inBounds.Min.X; x < inBounds.Max.X; x++ {
-			r, g, b, a := img.At(x, y).RGBA()
-			fimg[4*(y*w+x)+0] = float32(r) / float32(65535.0)
-			fimg[4*(y*w+x)+1] = float32(g) / float32(65535.0)
-			fimg[4*(y*w+x)+2] = float32(b) / float32(65535.0)
-			fimg[4*(y*w+x)+3] = float32(a) / float32(65535.0)
-			fimg[4*(y*w+x)+0] *= 0.5
-			//fmt.Println(r)
-		}
+	for i := 0; i < len * 4; i++ {
+		fimg[i] = 0.0
 	}
 
+	n := 16
+
+	for i := 0; i < n; i++ {
+		accumulate(fimg, img);
+	}
+
+	divBy(fimg, float32(n))
+
 	outimg := image.NewRGBA(inBounds)
+
+	var w = inBounds.Dx()
 
 	for y := inBounds.Min.Y; y < inBounds.Max.Y; y++ {
 		for x := inBounds.Min.X; x < inBounds.Max.X; x++ {
@@ -74,7 +100,7 @@ func main() {
 		}
 	}
 	
-    out, err := os.Create("test_resized.jpg")
+    out, err := os.Create("output.jpg")
     if err != nil {
         log.Fatal(err)
     }
