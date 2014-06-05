@@ -340,7 +340,7 @@ func composeImage(dst *draw.Image, src image.Image, ratio int) {
 		out_r = src_r * src_A + dst_r * (1 - src_A)
 	*/
 	if *dst == nil {
-		*dst = image.NewRGBA(src.Bounds())
+		*dst = image.NewRGBA64(src.Bounds())
 		draw.Draw(*dst, (*dst).Bounds(), src, image.ZP, draw.Src)
 	} else {
 		m := &image.Uniform{&color.RGBA{0, 0, 0, 255 / uint8(ratio)}}
@@ -348,6 +348,46 @@ func composeImage(dst *draw.Image, src image.Image, ratio int) {
 	}
 	return
 }
+
+func clamp(f float32) uint16 {
+	i := int32(f * 65535)
+	if i < 0 {
+		i = 0
+	}
+
+	return uint16(i)
+}
+
+func accumulateImage(dst* []float32, src image.Image) {
+
+	inBounds := src.Bounds()
+
+	if *dst == nil {
+		*dst = make([]float32, inBounds.Dx() * inBounds.Dy() * 4)
+	}
+
+	var w = inBounds.Dx()
+
+	for y := inBounds.Min.Y; y < inBounds.Max.Y; y++ {
+		for x := inBounds.Min.X; x < inBounds.Max.X; x++ {
+			r, g, b, a := src.At(x, y).RGBA()
+			(*dst)[4*(y*w+x)+0] += float32(r) / float32(65535.0)
+			(*dst)[4*(y*w+x)+1] += float32(g) / float32(65535.0)
+			(*dst)[4*(y*w+x)+2] += float32(b) / float32(65535.0)
+			(*dst)[4*(y*w+x)+3] += float32(a) / float32(65535.0)
+		}
+	}
+}
+
+func divImage(dst []float32, n float32) {
+
+	invN := 1.0 / n
+
+	for i := 0; i < len(dst); i++ {
+		dst[i] *= invN
+	}
+}
+
 
 /**
  * @api {post} /sessions/:sessionId/renders Run rendering
@@ -383,7 +423,9 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 		go requestRender(message, redisPool, res)
 	}
 
-	var composed draw.Image = nil
+	var accum []float32 = nil
+	var bounds image.Rectangle
+
 	for i := 0; i < renderTimes; i++ {
 		received := <-res
 
@@ -406,12 +448,33 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 			return
 		}
 
-		composeImage(&composed, curImg, renderTimes)
+		// Assume all image have same extent
+		bounds = curImg.Bounds()
+
+		//composeImage(&composed, curImg, renderTimes)
+		accumulateImage(&accum, curImg)
 	}
+
+	divImage(accum, float32(renderTimes))
+
+    outimg := image.NewRGBA(bounds)
+
+    var width = bounds.Dx()
+
+    for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+        for x := bounds.Min.X; x < bounds.Max.X; x++ {
+            r := accum[4*(y*width+x)+0]
+            g := accum[4*(y*width+x)+1]
+            b := accum[4*(y*width+x)+2]
+            a := accum[4*(y*width+x)+3]
+            rgba := color.RGBA64{clamp(r), clamp(g), clamp(b), clamp(a)}
+            outimg.Set(x, y, rgba)
+        }
+    }
 
 	var resBuf bytes.Buffer
 
-	if err := jpeg.Encode(&resBuf, composed, &jpeg.Options{Quality: 100}); err != nil {
+	if err := jpeg.Encode(&resBuf, outimg, &jpeg.Options{Quality: 100}); err != nil {
 		raiseHttpError(w, err)
 		return
 	}
