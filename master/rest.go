@@ -520,7 +520,7 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 			}
 			m, _ := url.ParseQuery(r.URL.RawQuery)
 		
-			renderTimes := 4
+			renderTimes := 1
 			if m["parallel"] != nil {
 				n, err := strconv.Atoi(m["parallel"][0])
 				if err == nil {
@@ -529,8 +529,8 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 					// clamp
 					if renderTimes < 1 {
 						renderTimes = 1
-					} else if renderTimes > 128 {
-						renderTimes = 128
+					} else if renderTimes > 16384 {
+						renderTimes = 16384
 					}
 				}
 			}
