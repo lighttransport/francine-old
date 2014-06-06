@@ -529,8 +529,8 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 					// clamp
 					if renderTimes < 1 {
 						renderTimes = 1
-					} else if renderTimes > 16384 {
-						renderTimes = 16384
+					} else if renderTimes > 256 {
+						renderTimes = 256
 					}
 				}
 			}
