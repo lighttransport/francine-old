@@ -121,7 +121,8 @@ func RestartDemo(masterInstance string) error {
 
 func DeleteWorkers() error {
 	lst := exec.Command("gcutil", "listinstances", "--format", "names", "--project", "gcp-samples", "--filter=name eq '.*lte-worker.*'")
-	delinst := exec.Command("xargs", "gcutil", "deleteinstance", "--force", "--delete_boot_pd"); // --force option needs also specify delete persistent disk option(--[no]delete_boot_pd)
+    // without -n, it hangs for deleting 100 or more nodes at a time.
+	delinst := exec.Command("xargs", "-n", "16", "gcutil", "deleteinstance", "--force", "--delete_boot_pd"); // --force option needs also specify delete persistent disk option(--[no]delete_boot_pd)
 
     delinst.Stdin, _ = lst.StdoutPipe()
     lst.Stderr = os.Stderr
