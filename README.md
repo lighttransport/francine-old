@@ -34,3 +34,13 @@ Renderer backend for massive server environment.
 
 ### Create worker GCE instance
     ./ltesetup create_worker
+
+
+### TODOs
+
+* Authentification(OAuth2)
+* Session management
+* Efficient handling of 1K ~ 10K compute nodes. 
+* Efficient file distribution.
+* Efficient image accumulation.
+
