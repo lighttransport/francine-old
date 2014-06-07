@@ -98,7 +98,7 @@ func createWorkerInstance(etcdHost string) {
 	var transport oauth.Transport
 	json.Unmarshal(decoded, &transport)
 
-	if res, err := postRequest(`https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/`+zone+`/disks?sourceImage=https%3A%2F%2Fwww.googleapis.com%2Fcompute%2Fv1%2Fprojects%2Fgcp-samples%2Fglobal%2Fimages%2Fprojects/coreos-cloud/global/images/coreos-alpha-338-0-0-v20140604`,
+	if res, err := postRequest(`https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/`+zone+`/disks?sourceImage=https%3A%2F%2Fwww.googleapis.com%2Fcompute%2Fv1%2Fprojects%2Fgcp-samples%2Fglobal%2Fimages%2Fcoreos-v282-0-0`,
 		map[string]interface{}{
 			"zone":        "https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/" + zone,
 			"name":        instanceName,
