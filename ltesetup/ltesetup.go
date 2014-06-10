@@ -34,7 +34,7 @@ func AddInstance(config *InstConfig) error {
 		`--external_ip_address=`+config.ipType,
 		`--service_account_scopes=https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/compute,https://www.googleapis.com/auth/devstorage.full_control`,
 		//`--image=https://www.googleapis.com/compute/v1/projects/gcp-samples/global/images/coreos-v282-0-0`,
-		`--image=projects/coreos-cloud/global/images/coreos-alpha-324-1-0-v20140522`,
+		`--image=projects/coreos-cloud/global/images/coreos-beta-324-5-0-v20140609`,
 		`--metadata_from_file=user-data:`+config.cloudConfig,
 		`--boot_disk_size_gb=15`,
 		`--persistent_boot_disk=true`,
