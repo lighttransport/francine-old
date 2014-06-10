@@ -19,7 +19,7 @@ coreos:
         [Service]
         ExecStartPre=/usr/bin/sudo /bin/sh -xc "echo '127.0.0.1 localhost' >> /etc/hosts; exit 0"
         ExecStartPre=/usr/bin/mkdir -p /home/peryaudo/registry
-        ExecStart=/usr/bin/docker run -p 5001:5000 -v /home/peryaudo/registry:/tmp/registry registry
+        ExecStart=/usr/bin/docker run -p 5001:5000 -e STORAGE_PATH=/tmp/registry -v /home/peryaudo/registry:/tmp/registry registry
 
         [Install]
         WantedBy=multi-user.target
