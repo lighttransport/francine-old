@@ -303,6 +303,13 @@ func requestRender(message *Message, redisPool *redis.Pool, res chan Result) {
 			return
 		}
 
+        // Delete the image after 30 min
+		_, err = conn.Do("EXPIRE", "render_image:"+message.RenderId, 1800)
+		if err != nil {
+			res <- Result{Err: err}
+			return
+		}
+
 		var imageDataJson struct {
 			JpegData string `json:"jpegdata"`
 		}
