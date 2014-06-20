@@ -17,3 +17,16 @@ coreos:
 
         [Install]
         WantedBy=multi-user.target
+    - name: send-log.service
+      command: start
+      content: |
+        [Unit]
+        Description=Send Log
+        After=fluentd-norikra.service
+        Requires=fluentd-norikra.service
+
+        [Service]
+        ExecStart=/bin/sh -xc "journalctl -f -o json | ncat <fluentd_server> 24224"
+
+        [Install]
+        WantedBy=multi-user.target

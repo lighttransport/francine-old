@@ -75,6 +75,10 @@ func createWorkerInstance(etcdHost string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	fluentdServer, err := getEtcdValue(etcdHost, "fluentd-server")
+	if err != nil {
+		log.Fatal(err)
+	}
 	instanceName := "lte-worker-" + time.Now().Format("20060102150405")
 	zone := "us-central1-a"
 	machineType := "n1-standard-1"
@@ -89,6 +93,7 @@ func createWorkerInstance(etcdHost string) {
 	cloudConfig = strings.Replace(cloudConfig, "<hostname>", instanceName, -1)
 	cloudConfig = strings.Replace(cloudConfig, "<lte_worker_url>", tokenUrl, -1)
 	cloudConfig = strings.Replace(cloudConfig, "<redis_server>", redisServer, -1)
+	cloudConfig = strings.Replace(cloudConfig, "<fluentd_server>", fluentdServer, -1)
 
 	decoded, err := base64.StdEncoding.DecodeString(gceOAuthToken)
 	if err != nil {
@@ -123,10 +128,10 @@ func createWorkerInstance(etcdHost string) {
 			"source":     "https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/" + zone + "/disks/" + instanceName}},
 		"networkInterfaces": []interface{}{map[string]interface{}{
 			"network": "https://www.googleapis.com/compute/v1/projects/gcp-samples/global/networks/lte-cluster"}},
-			// NOTE: no accessConfigs[] = will have no external internet access
-			//"accessConfigs": []interface{}{map[string]string{
-			//	"name": "External NAT",
-			//	"type": "ONE_TO_ONE_NAT"}}}},
+		// NOTE: no accessConfigs[] = will have no external internet access
+		//"accessConfigs": []interface{}{map[string]string{
+		//	"name": "External NAT",
+		//	"type": "ONE_TO_ONE_NAT"}}}},
 		"metadata": map[string]interface{}{
 			"items": []interface{}{
 				map[string]string{
