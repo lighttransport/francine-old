@@ -99,8 +99,46 @@ func createWorkerInstances(etcdHost string, number int) {
 	}
 
 	for i := 0; i < number; i++ {
-		instanceName := "lte-worker-" + time.Now().Format("20060102150405")
-		createWorkerInstancesInternal(transport, instanceName, tokenUrl, redisServer, logentriesToken, cloudConfig)
+		instanceName := "lte-worker-" + strings.Replace(time.Now().Format("20060102150405.000"), ".", "", -1)
+		go createWorkerInstancesInternal(transport, instanceName, tokenUrl, redisServer, logentriesToken, cloudConfig)
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
+const (
+	DiskCreating = iota
+	DiskFailed
+	DiskReady
+)
+
+func getDiskState(transport oauth.Transport, diskName string) (int, error) {
+	resp, err := transport.Client().Get(`https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/` + zone + `/disks/` + diskName)
+	if err != nil {
+		return -1, err
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return -1, err
+	}
+
+	var disk map[string]interface{}
+	if err = json.Unmarshal(body, &disk); err != nil {
+		return -1, err
+	}
+
+	switch disk["status"].(string) {
+	case "RESTORING":
+		fallthrough
+	case "CREATING":
+		return DiskCreating, nil
+	case "FAILED":
+		return DiskFailed, nil
+	case "READY":
+		return DiskReady, nil
+	default:
+		log.Fatalln("[MASTER] unknown disk state " + disk["status"].(string))
+		return -1, nil
 	}
 }
 
@@ -117,13 +155,35 @@ func createWorkerInstancesInternal(transport oauth.Transport, instanceName, toke
 			"name":        instanceName,
 			"description": ""},
 		transport.Client()); err != nil {
-		log.Fatal(err)
+		log.Fatalln(err)
 	} else {
 		log.Println(res)
 	}
 
-	log.Println("[WORKER] waiting 60s for disk preparing...")
-	time.Sleep(60 * time.Second)
+	{
+		i := 0
+		for i = 0; i < 10; i++ {
+			log.Println("[MASTER] waiting 30s for disk preparing...")
+			time.Sleep(30 * time.Second)
+
+			state, err := getDiskState(transport, instanceName)
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			if state == DiskFailed {
+				log.Println("[MASTER] failed to create disk")
+				return
+			}
+			if state == DiskReady {
+				break
+			}
+		}
+		if i >= 10 {
+			log.Println("[MASTER] failed to create disk")
+			return
+		}
+	}
 
 	req := map[string]interface{}{
 		"disks": []interface{}{map[string]interface{}{
