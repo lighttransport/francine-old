@@ -3,11 +3,11 @@
   , "version": "0.0.1"
   , "private": true
   , "dependencies": {
-      "socket.io": ">=0.9.16"
+      "socket.io": "0.9.16"
     , "passport": "*"
     , "passport-oauth": "*"
     , "mongoose": "*"
-    , "connect": "*"
+    , "connect": "2.*"
     , "express": "3.x"
     , "cookie": "*"
     , "q": "*"

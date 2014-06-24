@@ -22,11 +22,7 @@ coreos:
       content: |
         [Unit]
         Description=Send Log
-        After=fluentd-norikra.service
-        Requires=fluentd-norikra.service
-
         [Service]
-        ExecStart=/bin/sh -xc "journalctl -f -o json | ncat <fluentd_server> 24224"
-
+        ExecStart=/bin/sh -xc "journalctl -o short -f | awk '{ print \"<logentries_token>\", $0; fflush(); }' | ncat data.logentries.com 10000"
         [Install]
         WantedBy=multi-user.target
