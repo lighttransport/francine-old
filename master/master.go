@@ -258,6 +258,18 @@ func deleteWorkerInstance(etcdHost, instanceName string) error {
 	return nil
 }
 
+func stopWorker(workerName string, redisPool *redis.Pool) error {
+	conn := redisPool.Get()
+	defer conn.Close()
+
+	_, err := conn.Do("RPUSH", "cmd:"+workerName, "stop")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func main() {
 	workers := make(map[string]time.Time)
 
