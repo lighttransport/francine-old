@@ -113,11 +113,7 @@ func CreateMaster(instance, logentriesToken string) error {
 }
 
 func SendCreateWorker(masterInstance string, num int) error {
-	cmd := ""
-	for i := 0; i < num; i++ {
-		cmd += "sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush cmd:lte-master create\n"
-	}
-	return SendCommand(masterInstance, cmd)
+	return SendCommand(masterInstance, "sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush cmd:lte-master create:"+strconv.Itoa(num))
 }
 
 func RestartWorkers(masterInstance string) error {
@@ -327,12 +323,9 @@ options:
 		num := 1
 		if len(flag.Args()) >= 2 {
 			num, err = strconv.Atoi(flag.Args()[1])
-			if err == nil {
-				if num < 1 {
-					num = 1
-				} else if num > 16 {
-					num = 16
-				}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "cannot parse the number of created workers")
+				os.Exit(1)
 			}
 
 		}

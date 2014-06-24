@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +18,8 @@ import (
 const (
 	redisMaxIdle = 5
 	verbose      = true
+	zone         = "asia-east1-a"
+	machineType  = "n1-standard-1"
 )
 
 func getEtcdValue(etcdHost, key string) (string, error) {
@@ -62,7 +65,7 @@ func postRequest(url string, data interface{}, client *http.Client) (string, err
 	return string(body), nil
 }
 
-func createWorkerInstance(etcdHost string) {
+func createWorkerInstances(etcdHost string, number int) {
 	tokenUrl, err := getEtcdValue(etcdHost, "lte-worker-url")
 	if err != nil {
 		log.Fatal(err)
@@ -79,21 +82,6 @@ func createWorkerInstance(etcdHost string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	instanceName := "lte-worker-" + time.Now().Format("20060102150405")
-	zone := "asia-east1-a"
-	machineType := "n1-standard-1"
-
-	var cloudConfig string
-	if r, err := ioutil.ReadFile("/tmp/cloud-config-worker.yaml"); err != nil {
-		log.Fatal(err)
-	} else {
-		cloudConfig = string(r)
-	}
-
-	cloudConfig = strings.Replace(cloudConfig, "<hostname>", instanceName, -1)
-	cloudConfig = strings.Replace(cloudConfig, "<lte_worker_url>", tokenUrl, -1)
-	cloudConfig = strings.Replace(cloudConfig, "<redis_server>", redisServer, -1)
-	cloudConfig = strings.Replace(cloudConfig, "<logentries_token>", logentriesToken, -1)
 
 	decoded, err := base64.StdEncoding.DecodeString(gceOAuthToken)
 	if err != nil {
@@ -102,6 +90,26 @@ func createWorkerInstance(etcdHost string) {
 
 	var transport oauth.Transport
 	json.Unmarshal(decoded, &transport)
+
+	var cloudConfig string
+	if r, err := ioutil.ReadFile("/tmp/cloud-config-worker.yaml"); err != nil {
+		log.Fatal(err)
+	} else {
+		cloudConfig = string(r)
+	}
+
+	for i := 0; i < number; i++ {
+		instanceName := "lte-worker-" + time.Now().Format("20060102150405")
+		createWorkerInstancesInternal(transport, instanceName, tokenUrl, redisServer, logentriesToken, cloudConfig)
+	}
+}
+
+func createWorkerInstancesInternal(transport oauth.Transport, instanceName, tokenUrl, redisServer, logentriesToken, cloudConfig string) {
+
+	cloudConfig = strings.Replace(cloudConfig, "<hostname>", instanceName, -1)
+	cloudConfig = strings.Replace(cloudConfig, "<lte_worker_url>", tokenUrl, -1)
+	cloudConfig = strings.Replace(cloudConfig, "<redis_server>", redisServer, -1)
+	cloudConfig = strings.Replace(cloudConfig, "<logentries_token>", logentriesToken, -1)
 
 	if res, err := postRequest(`https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/`+zone+`/disks?sourceImage=https%3A%2F%2Fwww.googleapis.com%2Fcompute%2Fv1%2Fprojects%2Fgcp-samples%2Fglobal%2Fimages%2Fcoreos-v282-0-0`,
 		map[string]interface{}{
@@ -200,7 +208,15 @@ func main() {
 					log.Println("please set ETCD_HOST")
 					os.Exit(1)
 				}
-				go createWorkerInstance(etcdHost)
+				number := 1
+				if len(split) >= 2 {
+					number, err = strconv.Atoi(split[1])
+					if err != nil {
+						log.Println("invalid number of created workers")
+						continue
+					}
+				}
+				go createWorkerInstances(etcdHost, number)
 			case "ping":
 				workers[split[1]] = time.Now()
 				log.Printf("[MASTER] ping from %s\n", split[1])
