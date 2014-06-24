@@ -65,12 +65,27 @@ func postRequest(url string, data interface{}, client *http.Client) (string, err
 	return string(body), nil
 }
 
+func getTransportFromToken(etcdHost string) (*oauth.Transport, error) {
+	gceOAuthToken, err := getEtcdValue(etcdHost, "gce-oauth-token")
+	if err != nil {
+		return nil, err
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(gceOAuthToken)
+	if err != nil {
+		return nil, err
+	}
+
+	var transport oauth.Transport
+	if err = json.Unmarshal(decoded, &transport); err != nil {
+		return nil, err
+	}
+
+	return &transport, nil
+}
+
 func createWorkerInstances(etcdHost string, number int) {
 	tokenUrl, err := getEtcdValue(etcdHost, "lte-worker-url")
-	if err != nil {
-		log.Fatal(err)
-	}
-	gceOAuthToken, err := getEtcdValue(etcdHost, "gce-oauth-token")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -83,13 +98,10 @@ func createWorkerInstances(etcdHost string, number int) {
 		log.Fatal(err)
 	}
 
-	decoded, err := base64.StdEncoding.DecodeString(gceOAuthToken)
+	transport, err := getTransportFromToken(etcdHost)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln(err)
 	}
-
-	var transport oauth.Transport
-	json.Unmarshal(decoded, &transport)
 
 	var cloudConfig string
 	if r, err := ioutil.ReadFile("/tmp/cloud-config-worker.yaml"); err != nil {
@@ -100,7 +112,7 @@ func createWorkerInstances(etcdHost string, number int) {
 
 	for i := 0; i < number; i++ {
 		instanceName := "lte-worker-" + strings.Replace(time.Now().Format("20060102150405.000"), ".", "", -1)
-		go createWorkerInstancesInternal(transport, instanceName, tokenUrl, redisServer, logentriesToken, cloudConfig)
+		go createWorkerInstancesInternal(*transport, instanceName, tokenUrl, redisServer, logentriesToken, cloudConfig)
 		time.Sleep(300 * time.Millisecond)
 	}
 }
@@ -226,6 +238,24 @@ func createWorkerInstancesInternal(transport oauth.Transport, instanceName, toke
 	} else {
 		log.Println(res)
 	}
+}
+
+func deleteWorkerInstance(etcdHost, instanceName string) error {
+	transport, err := getTransportFromToken(etcdHost)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest("DELETE", `https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/`+zone+`/instances/`+instanceName, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := transport.Client().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	ioutil.ReadAll(resp.Body)
+	return nil
 }
 
 func main() {
