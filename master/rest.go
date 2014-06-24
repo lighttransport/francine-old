@@ -178,7 +178,7 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 		Status string
 		Name   string
 		Hash   string
-		Size   int		// Up to 2GB
+		Size   int // Up to 2GB
 	}
 
 	result.Status = "Ok"
@@ -303,7 +303,7 @@ func requestRender(message *Message, redisPool *redis.Pool, res chan Result) {
 			return
 		}
 
-        // Delete the image after 30 min
+		// Delete the image after 30 min
 		_, err = conn.Do("EXPIRE", "render_image:"+message.RenderId, 1800)
 		if err != nil {
 			res <- Result{Err: err}
@@ -365,12 +365,12 @@ func clamp(f float32) uint16 {
 	return uint16(i)
 }
 
-func accumulateImage(dst* []float32, src image.Image) {
+func accumulateImage(dst *[]float32, src image.Image) {
 
 	inBounds := src.Bounds()
 
 	if *dst == nil {
-		*dst = make([]float32, inBounds.Dx() * inBounds.Dy() * 4)
+		*dst = make([]float32, inBounds.Dx()*inBounds.Dy()*4)
 	}
 
 	var w = inBounds.Dx()
@@ -395,7 +395,6 @@ func divImage(dst []float32, n float32) {
 	}
 }
 
-
 /**
  * @api {post} /sessions/:sessionId/renders Run rendering
  * @apiVersion 0.9.0
@@ -417,8 +416,19 @@ func divImage(dst []float32, n float32) {
  *
  */
 
-func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string, renderTimes int) {
+// type Render struct {
+// 	w              http.ResponseWriter
+// 	r              *http.Request
+// 	redisPool      *redis.Pool
+// 	session        string
+// 	renderTimes    int
+// 	renderDuration chan time.Duration
+// }
+
+func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string, renderTimes int, renderDuration chan time.Duration) {
 	// TODO: increment reference count of resources while renering is running
+
+	beginTime := time.Now()
 
 	res := make(chan Result, renderTimes)
 
@@ -464,20 +474,20 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 
 	divImage(accum, float32(renderTimes))
 
-    outimg := image.NewRGBA(bounds)
+	outimg := image.NewRGBA(bounds)
 
-    var width = bounds.Dx()
+	var width = bounds.Dx()
 
-    for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-        for x := bounds.Min.X; x < bounds.Max.X; x++ {
-            r := accum[4*(y*width+x)+0]
-            g := accum[4*(y*width+x)+1]
-            b := accum[4*(y*width+x)+2]
-            a := accum[4*(y*width+x)+3]
-            rgba := color.RGBA64{clamp(r), clamp(g), clamp(b), clamp(a)}
-            outimg.Set(x, y, rgba)
-        }
-    }
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r := accum[4*(y*width+x)+0]
+			g := accum[4*(y*width+x)+1]
+			b := accum[4*(y*width+x)+2]
+			a := accum[4*(y*width+x)+3]
+			rgba := color.RGBA64{clamp(r), clamp(g), clamp(b), clamp(a)}
+			outimg.Set(x, y, rgba)
+		}
+	}
 
 	var resBuf bytes.Buffer
 
@@ -486,6 +496,8 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 		return
 	}
 
+	renderDuration <- time.Now().Sub(beginTime)
+
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Write(resBuf.Bytes())
@@ -493,7 +505,22 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 	return
 }
 
-func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) {
+func imax(x, y int) int {
+	if x > y {
+		return x
+	} else {
+		return y
+	}
+}
+func imin(x, y int) int {
+	if x > y {
+		return y
+	} else {
+		return x
+	}
+}
+
+func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, renderDuration chan time.Duration) {
 	path := r.URL.Path
 
 	if verbose {
@@ -526,26 +553,22 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 				log.Println("[MASTER] request dispatched")
 			}
 			m, _ := url.ParseQuery(r.URL.RawQuery)
-		
+
 			renderTimes := 1
 			if m["parallel"] != nil {
 				n, err := strconv.Atoi(m["parallel"][0])
 				if err == nil {
 					renderTimes = n
-
-					// clamp
-					if renderTimes < 1 {
-						renderTimes = 1
-					} else if renderTimes > 256 {
-						renderTimes = 256
-					}
 				}
 			}
+
+			renderTimes = imin(imax(renderTimes, 1), 256)
+
 			if verbose {
-				log.Println("[MASTER] renderTimes = %d", renderTimes)
+				log.Printf("[MASTER] renderTimes = %d\n", renderTimes)
 			}
 
-			restNewRender(w, r, redisPool, matched[1], renderTimes)
+			restNewRender(w, r, redisPool, matched[1], renderTimes, renderDuration)
 			return
 		}
 	}
@@ -567,9 +590,9 @@ func redisInit(redisPool *redis.Pool) {
 	return
 }
 
-func startRestServer(redisPool *redis.Pool) {
+func startRestServer(redisPool *redis.Pool, renderDuration chan time.Duration) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		restHandler(w, r, redisPool)
+		restHandler(w, r, redisPool, renderDuration)
 	})
 
 	go redisInit(redisPool)

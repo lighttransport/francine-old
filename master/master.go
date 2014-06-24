@@ -270,9 +270,27 @@ func stopWorker(workerName string, redisPool *redis.Pool) error {
 	return nil
 }
 
-func main() {
-	workers := make(map[string]time.Time)
+func manageWorkers(redisPool *redis.Pool, workerPing chan string, renderDuration chan time.Duration, reloadWorkers chan struct{}) {
+	workers := make(map[string]struct{})
 
+	for {
+		select {
+		case workerName := <-workerPing:
+			log.Printf("[MASTER] ping from %s\n", workerName)
+			workers[workerName] = struct{}{}
+		case renderDuratinoVal := <-renderDuration:
+			log.Printf("[MASTER] rendering duration: %d ms\n", renderDuratinoVal/time.Millisecond)
+		case <-reloadWorkers:
+			redisConn := redisPool.Get()
+			for worker, _ := range workers {
+				redisConn.Do("RPUSH", "cmd:"+worker, "restart")
+			}
+			redisConn.Close()
+		}
+	}
+}
+
+func main() {
 	etcdHost := os.Getenv("ETCD_HOST")
 
 	redisUrl := os.Getenv("REDIS_HOST")
@@ -296,7 +314,12 @@ func main() {
 		}, redisMaxIdle)
 	defer redisPool.Close()
 
-	go startRestServer(redisPool)
+	workerPing := make(chan string)
+	renderDuration := make(chan time.Duration)
+	reloadWorkers := make(chan struct{})
+	go manageWorkers(redisPool, workerPing, renderDuration, reloadWorkers)
+
+	go startRestServer(redisPool, renderDuration)
 
 	for {
 		redisConn := redisPool.Get()
@@ -320,12 +343,9 @@ func main() {
 				}
 				go createWorkerInstances(etcdHost, number)
 			case "ping":
-				workers[split[1]] = time.Now()
-				log.Printf("[MASTER] ping from %s\n", split[1])
+				workerPing <- split[1]
 			case "restart_workers":
-				for worker, _ := range workers {
-					redisConn.Do("RPUSH", "cmd:"+worker, "restart")
-				}
+				reloadWorkers <- struct{}{}
 			}
 		}
 
