@@ -172,7 +172,7 @@ func sendLteAck(data *LteAck, renderId string, conn redis.Conn) {
 
 	conn.Send("MULTI")
 	conn.Send("DEL", key)
-	conn.Send("LPUSH", key, strData)
+	conn.Send("RPUSH", key, strData)
 	conn.Send("EXPIRE", key, lteAckTtl)
 	conn.Send("LTRIM", key, 0, 0)
 	_, err := conn.Do("EXEC")
