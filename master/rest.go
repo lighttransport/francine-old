@@ -318,8 +318,7 @@ func requestRender(message *Message, redisPool *redis.Pool, res chan Result, wai
 				return
 			}
 
-			// Delete the image after 30 min
-			_, err = conn.Do("EXPIRE", "render_image:"+message.RenderId, 1800)
+			_, err = conn.Do("DEL", "render_image:"+message.RenderId, "lte-ack:"+message.RenderId)
 			if err != nil {
 				res <- Result{Err: err}
 				return
