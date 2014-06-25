@@ -270,7 +270,7 @@ func stopWorker(workerName string, redisPool *redis.Pool) error {
 	return nil
 }
 
-func manageWorkers(redisPool *redis.Pool, workerPing chan string, renderDuration chan time.Duration, reloadWorkers chan struct{}) {
+func manageWorkers(redisPool *redis.Pool, workerPing chan string, waitingDuration chan time.Duration, reloadWorkers chan struct{}) {
 	workers := make(map[string]struct{})
 
 	for {
@@ -278,8 +278,8 @@ func manageWorkers(redisPool *redis.Pool, workerPing chan string, renderDuration
 		case workerName := <-workerPing:
 			log.Printf("[MASTER] ping from %s\n", workerName)
 			workers[workerName] = struct{}{}
-		case renderDuratinoVal := <-renderDuration:
-			log.Printf("[MASTER] rendering duration: %d ms\n", renderDuratinoVal/time.Millisecond)
+		case waitingDurationVal := <-waitingDuration:
+			log.Printf("[MASTER] waiting duration: %d ms\n", waitingDurationVal/time.Millisecond)
 		case <-reloadWorkers:
 			redisConn := redisPool.Get()
 			for worker, _ := range workers {
@@ -314,12 +314,12 @@ func main() {
 		}, redisMaxIdle)
 	defer redisPool.Close()
 
-	workerPing := make(chan string)
-	renderDuration := make(chan time.Duration)
-	reloadWorkers := make(chan struct{})
-	go manageWorkers(redisPool, workerPing, renderDuration, reloadWorkers)
+	workerPing := make(chan string, 256)
+	waitingDuration := make(chan time.Duration, 256)
+	reloadWorkers := make(chan struct{}, 256)
+	go manageWorkers(redisPool, workerPing, waitingDuration, reloadWorkers)
 
-	go startRestServer(redisPool, renderDuration)
+	go startRestServer(redisPool, waitingDuration)
 
 	for {
 		redisConn := redisPool.Get()

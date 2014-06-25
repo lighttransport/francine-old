@@ -50,6 +50,8 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 
 	json.Unmarshal(msgBytes, &message)
 
+	sendLteAck(&LteAck{Status: "Start"}, message.RenderId, conn)
+
 	resourceDir := "/tmp/renders/" + message.RenderId
 
 	if err := os.MkdirAll(resourceDir, 0755); err != nil {
@@ -170,14 +172,7 @@ func sendLteAck(data *LteAck, renderId string, conn redis.Conn) {
 	key := "lte-ack:" + renderId
 	strData, _ := json.Marshal(data)
 
-	conn.Send("MULTI")
-	conn.Send("DEL", key)
-	conn.Send("RPUSH", key, strData)
-	conn.Send("EXPIRE", key, lteAckTtl)
-	conn.Send("LTRIM", key, 0, 0)
-	_, err := conn.Do("EXEC")
-
-	if err != nil {
+	if _, err := conn.Do("RPUSH", key, strData); err != nil {
 		log.Println(err)
 	}
 

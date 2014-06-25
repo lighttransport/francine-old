@@ -261,7 +261,29 @@ func generateRenderMessage(session string, redisPool *redis.Pool) (*Message, err
 	return message, nil
 }
 
-func requestRender(message *Message, redisPool *redis.Pool, res chan Result) {
+func receiveLteAck(renderId string, conn redis.Conn) (*LteAck, []byte, error) {
+	var lteAckBytes []byte
+
+	for {
+		resp, err := conn.Do("BLPOP", "lte-ack:"+renderId, 0)
+
+		if resp != nil {
+			lteAckBytes = resp.([]interface{})[1].([]byte)
+			break
+		}
+
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	var lteAck LteAck
+	json.Unmarshal(lteAckBytes, &lteAck)
+
+	return &lteAck, lteAckBytes, nil
+}
+
+func requestRender(message *Message, redisPool *redis.Pool, res chan Result, waitingDuration chan time.Duration) {
 	conn := redisPool.Get()
 	defer conn.Close()
 
@@ -271,69 +293,63 @@ func requestRender(message *Message, redisPool *redis.Pool, res chan Result) {
 		return
 	}
 
+	beginTime := time.Now()
+
 	if _, err := conn.Do("RPUSH", "render-queue", marshaled); err != nil {
 		res <- Result{Err: err}
 		return
 	}
 
-	var lteAckBytes []byte
-
 	for {
-		resp, err := conn.Do("BLPOP", "lte-ack:"+message.RenderId, 0)
-
-		if resp != nil {
-			lteAckBytes = resp.([]interface{})[1].([]byte)
-			break
-		}
-
-		if err != nil {
-			res <- Result{Err: err}
-			return
-		}
-	}
-
-	var lteAck LteAck
-	json.Unmarshal(lteAckBytes, &lteAck)
-
-	switch lteAck.Status {
-	case "Ok":
-		imageDataResp, err := conn.Do("GET", "render_image:"+message.RenderId)
+		lteAck, lteAckBytes, err := receiveLteAck(message.RenderId, conn)
 		if err != nil {
 			res <- Result{Err: err}
 			return
 		}
 
-		// Delete the image after 30 min
-		_, err = conn.Do("EXPIRE", "render_image:"+message.RenderId, 1800)
-		if err != nil {
-			res <- Result{Err: err}
+		switch lteAck.Status {
+		case "Start":
+			waitingDuration <- time.Now().Sub(beginTime)
+
+		case "Ok":
+			imageDataResp, err := conn.Do("GET", "render_image:"+message.RenderId)
+			if err != nil {
+				res <- Result{Err: err}
+				return
+			}
+
+			// Delete the image after 30 min
+			_, err = conn.Do("EXPIRE", "render_image:"+message.RenderId, 1800)
+			if err != nil {
+				res <- Result{Err: err}
+				return
+			}
+
+			var imageDataJson struct {
+				JpegData string `json:"jpegdata"`
+			}
+
+			if err := json.Unmarshal(imageDataResp.([]byte), &imageDataJson); err != nil {
+				res <- Result{Err: err}
+				return
+			}
+
+			imageData, err := base64.StdEncoding.DecodeString(imageDataJson.JpegData)
+			if err != nil {
+				res <- Result{Err: err}
+				return
+			}
+
+			res <- Result{Image: imageData}
+			return
+
+		case "LinkError":
+			res <- Result{Ack: lteAckBytes}
+			return
+		default:
+			res <- Result{Err: errors.New("unknown lte-ack status: " + lteAck.Status)}
 			return
 		}
-
-		var imageDataJson struct {
-			JpegData string `json:"jpegdata"`
-		}
-
-		if err := json.Unmarshal(imageDataResp.([]byte), &imageDataJson); err != nil {
-			res <- Result{Err: err}
-			return
-		}
-
-		imageData, err := base64.StdEncoding.DecodeString(imageDataJson.JpegData)
-		if err != nil {
-			res <- Result{Err: err}
-			return
-		}
-
-		res <- Result{Image: imageData}
-		return
-
-	case "LinkError":
-		res <- Result{Ack: lteAckBytes}
-		return
-	default:
-		res <- Result{Err: errors.New("unknown lte-ack status: " + lteAck.Status)}
-		return
 	}
 }
 
@@ -422,13 +438,11 @@ func divImage(dst []float32, n float32) {
 // 	redisPool      *redis.Pool
 // 	session        string
 // 	renderTimes    int
-// 	renderDuration chan time.Duration
+// 	waitingDuration chan time.Duration
 // }
 
-func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string, renderTimes int, renderDuration chan time.Duration) {
+func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string, renderTimes int, waitingDuration chan time.Duration) {
 	// TODO: increment reference count of resources while renering is running
-
-	beginTime := time.Now()
 
 	res := make(chan Result, renderTimes)
 
@@ -437,7 +451,7 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 		if err != nil {
 			raiseHttpError(w, err)
 		}
-		go requestRender(message, redisPool, res)
+		go requestRender(message, redisPool, res, waitingDuration)
 	}
 
 	var accum []float32 = nil
@@ -496,8 +510,6 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 		return
 	}
 
-	renderDuration <- time.Now().Sub(beginTime)
-
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Write(resBuf.Bytes())
@@ -520,7 +532,7 @@ func imin(x, y int) int {
 	}
 }
 
-func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, renderDuration chan time.Duration) {
+func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, waitingDuration chan time.Duration) {
 	path := r.URL.Path
 
 	if verbose {
@@ -568,7 +580,7 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, 
 				log.Printf("[MASTER] renderTimes = %d\n", renderTimes)
 			}
 
-			restNewRender(w, r, redisPool, matched[1], renderTimes, renderDuration)
+			restNewRender(w, r, redisPool, matched[1], renderTimes, waitingDuration)
 			return
 		}
 	}
@@ -590,9 +602,9 @@ func redisInit(redisPool *redis.Pool) {
 	return
 }
 
-func startRestServer(redisPool *redis.Pool, renderDuration chan time.Duration) {
+func startRestServer(redisPool *redis.Pool, waitingDuration chan time.Duration) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		restHandler(w, r, redisPool, renderDuration)
+		restHandler(w, r, redisPool, waitingDuration)
 	})
 
 	go redisInit(redisPool)
