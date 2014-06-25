@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/garyburd/redigo/redis"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -19,6 +20,8 @@ const (
 	lteAckTtl       = 3600 // one hour
 	pingIntervalMin = 1    // minutes
 	verbose         = true
+	tmpPrefix       = "/tmp/lte"
+	cleanupInterval = 10 // minutes
 )
 
 type Resource struct {
@@ -52,14 +55,14 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 
 	sendLteAck(&LteAck{Status: "Start"}, message.RenderId, conn)
 
-	resourceDir := "/tmp/renders/" + message.RenderId
+	resourceDir := tmpPrefix + "/renders/" + message.RenderId
 
 	if err := os.MkdirAll(resourceDir, 0755); err != nil {
 		log.Println(err)
 		return
 	}
 
-	if err := os.MkdirAll("/tmp/resources", 0755); err != nil {
+	if err := os.MkdirAll(tmpPrefix+"/resources", 0755); err != nil {
 		log.Println(err)
 		return
 	}
@@ -71,7 +74,7 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 
 	// write the resource files
 	for _, resource := range message.Resources {
-		realPath := "/tmp/resources/" + resource.Hash
+		realPath := tmpPrefix + "/resources/" + resource.Hash
 		if _, err := os.Stat(realPath); os.IsNotExist(err) {
 			data, err := conn.Do("GET", "resource:"+resource.Hash)
 			if err != nil {
@@ -191,6 +194,45 @@ func sendPings(workerName string, redisPool *redis.Pool) {
 	}
 }
 
+func cleanResources(redisPool *redis.Pool) {
+	conn := redisPool.Get()
+	defer conn.Close()
+	for {
+		time.Sleep(cleanupInterval * time.Minute)
+		log.Println("[WORKER] clean up unused resources ...")
+
+		// list up files in resource directory
+		files, err := ioutil.ReadDir(tmpPrefix + "/resources")
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		conn.Send("MULTI")
+		for _, file := range files {
+			conn.Send("EXISTS", "resource:"+file.Name())
+		}
+
+		exists, err := conn.Do("EXEC")
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		for i, exist := range exists.([]interface{}) {
+			existBool := (exist.(int64) == 1)
+			if existBool {
+				continue
+			}
+			err = os.Remove(tmpPrefix + "/resources/" + files[i].Name())
+			if err != nil {
+				log.Println(err)
+				return
+			}
+		}
+	}
+}
+
 func main() {
 	workerName := os.Getenv("WORKER_NAME")
 	if workerName == "" {
@@ -213,6 +255,8 @@ func main() {
 	go sendPings(workerName, redisPool)
 
 	cmdQueueName := "cmd:" + workerName
+
+	go cleanResources(redisPool)
 
 	for {
 		redisConn := redisPool.Get()
