@@ -12,7 +12,7 @@ coreos:
         [Service]
         ExecStartPre=/bin/sh -xc "/usr/bin/docker pull <lte_worker_url>"
         ExecStart=/bin/sh -xc "/usr/bin/docker run -e REDIS_HOST=<redis_server> -e WORKER_NAME=<hostname> -w /home/default <lte_worker_url> /bin/worker"
-        Restart=always
+        Restart=on-failure
         RestartSec=30
 
         [Install]
