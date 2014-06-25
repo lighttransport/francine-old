@@ -102,7 +102,10 @@ func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Poo
 		log.Println("[MASTER] result marshaled")
 	}
 
-	if _, err := conn.Do("SET", "session:"+result.SessionId+":input-json", requestJson.InputJson); err != nil {
+	conn.Send("MULTI")
+	conn.Send("SET", "session:"+result.SessionId+":modified", strconv.FormatInt(time.Now().UnixNano(), 10))
+	conn.Send("SET", "session:"+result.SessionId+":input-json", requestJson.InputJson)
+	if _, err := conn.Do("EXEC"); err != nil {
 		raiseHttpError(w, err)
 		return
 	}
@@ -134,6 +137,140 @@ func doesSessionExist(session string, conn redis.Conn) (bool, error) {
 	} else {
 		return false, nil
 	}
+}
+
+func safelyDeleteResource(hash string, conn redis.Conn) error {
+	if _, err := conn.Do("WATCH", "resource:"+hash, "resource:"+hash+":counter"); err != nil {
+		return err
+	}
+	counterBytes, err := conn.Do("GET", "resource:"+hash+":counter")
+	if err != nil {
+		return err
+	}
+
+	counter, err := strconv.Atoi(string(counterBytes.([]byte)))
+	if err != nil {
+		return err
+	}
+
+	conn.Send("MULTI")
+	if counter > 1 {
+		conn.Send("SET", "resource:"+hash+":counter", counter-1)
+	} else {
+		conn.Send("DEL", "resource:"+hash, "resource:"+hash+":counter")
+	}
+
+	resp, err := conn.Do("EXEC")
+	if err != nil {
+		return err
+	}
+	if resp == nil {
+		return errors.New("optimistic locking failed")
+	}
+
+	return nil
+}
+
+func deleteSession(session string, conn redis.Conn) error {
+	members, err := conn.Do("SMEMBERS", "session:"+session+":resource")
+	if err != nil {
+		return err
+	}
+	_, err = conn.Do("DEL", "session:"+session+":input-json", "session:"+session+":resource",
+		"session:"+session+":modified")
+	if err != nil {
+		return err
+	}
+	for _, memberBytes := range members.([]interface{}) {
+		member := string(memberBytes.([]byte))
+
+		conn.Send("MULTI")
+		conn.Send("GET", "session:"+session+":resource:"+member)
+		conn.Send("DEL", "session:"+session+":resource:"+member)
+		resp, err := conn.Do("EXEC")
+		if err != nil {
+			log.Printf("[MASTER] failed to delete %s\n", "session:"+session+":resource:"+member)
+		}
+		hash := string(resp.([]interface{})[0].([]byte))
+
+		success := false
+		for i := 0; i < 5; i++ {
+			err = safelyDeleteResource(hash, conn)
+			if err == nil {
+				success = true
+				break
+			}
+			log.Printf("[MASTER] retry deleting resource %s\n", hash)
+			time.Sleep(200 * time.Microsecond)
+		}
+		if !success {
+			log.Printf("[MASTER] failed to safely delete resource %s\n", hash)
+		}
+	}
+	return nil
+}
+
+/**
+ * @api {delete} /sessions/:SessionId delete session
+ * @apiVersion 0.9.0
+ * @apiName NewSession
+ * @apiGroup Render
+ *
+ * @apiSuccess {String} Status "OK" if success.
+ *
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *     {
+ *       "Status": "Ok"
+ *     }
+ *
+ */
+func restDeleteSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string) {
+	conn := redisPool.Get()
+	defer conn.Close()
+	var result struct {
+		Status string
+	}
+	{
+		e, err := doesSessionExist(session, conn)
+		if err != nil {
+			raiseHttpError(w, err)
+			return
+		}
+
+		if e == false {
+			result.Status = "SessionDoesNotExist"
+
+			marshaled, err := json.Marshal(result)
+			if err != nil {
+				raiseHttpError(w, err)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(marshaled)
+			return
+		}
+	}
+
+	if err := deleteSession(session, conn); err != nil {
+		raiseHttpError(w, err)
+		return
+	}
+
+	result.Status = "Ok"
+
+	marshaled, err := json.Marshal(result)
+	if err != nil {
+		raiseHttpError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(marshaled)
+	return
 }
 
 /**
@@ -195,6 +332,7 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 			w.WriteHeader(http.StatusOK)
 			w.Header().Set("Content-Type", "application/json")
 			w.Write(marshaled)
+			return
 		}
 	}
 
@@ -203,12 +341,34 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 	hashBytes := sha256.Sum256(data)
 	hash := hex.EncodeToString(hashBytes[:])
 
-	// TODO: use WATCH to safely and effectively perform these operations
+	prevHash, err := conn.Do("GET", "session:"+session+":resource:"+resource)
+	if err != nil {
+		raiseHttpError(w, err)
+		return
+	}
+
+	if prevHash != nil {
+		success := false
+		for i := 0; i < 5; i++ {
+			err = safelyDeleteResource(string(prevHash.([]byte)), conn)
+			if err == nil {
+				success = true
+				break
+			}
+			time.Sleep(200 * time.Microsecond)
+			log.Printf("[MASTER] retry deleting resource %s\n", prevHash)
+		}
+		if !success {
+			log.Printf("[MASTER] failed to safely delete resource %s\n", prevHash)
+		}
+	}
+
 	conn.Send("MULTI")
 	conn.Send("SET", "resource:"+hash, data)
 	conn.Send("INCR", "resource:"+hash+":counter")
 	conn.Send("SET", "session:"+session+":resource:"+resource, hash)
 	conn.Send("SADD", "session:"+session+":resource", resource)
+	conn.Send("SET", "session:"+session+":modified", strconv.FormatInt(time.Now().UnixNano(), 10))
 	if _, err := conn.Do("EXEC"); err != nil {
 		raiseHttpError(w, err)
 		return
@@ -272,6 +432,7 @@ func generateRenderMessage(session string, redisPool *redis.Pool) (*Message, err
 	conn.Send("MULTI")
 	conn.Send("GET", "session:"+session+":input-json")
 	conn.Send("SMEMBERS", "session:"+session+":resource")
+	conn.Send("SET", "session:"+session+":modified", strconv.FormatInt(time.Now().UnixNano(), 10))
 	redisResp, err := conn.Do("EXEC")
 	if err != nil {
 		return nil, err
@@ -577,6 +738,16 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, 
 				log.Println("[MASTER] request dispatched")
 			}
 			restNewSession(w, r, redisPool)
+			return
+		}
+	}
+
+	if matched := regexp.MustCompile("^/sessions/(.+)$").FindStringSubmatch(path); matched != nil {
+		if r.Method == "DELETE" {
+			if verbose {
+				log.Println("[MASTER] request dispatched")
+			}
+			restDeleteSession(w, r, redisPool, matched[1])
 			return
 		}
 	}
