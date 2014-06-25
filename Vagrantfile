@@ -27,4 +27,5 @@ SCRIPT
   end
 
   config.vm.network "forwarded_port", guest: 7000, host: 7000, protocol: 'tcp'
+  config.vm.network "forwarded_port", guest: 80, host: 8000, protocol: 'tcp'
 end
