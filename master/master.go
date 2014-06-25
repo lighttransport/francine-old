@@ -24,6 +24,8 @@ const (
 	sessionCleanupIntereval = 10 // minutes
 	instanceListInterval    = 2  // minutes
 	instanceTimeout         = 10 // minutes
+	instanceAdjustInterval  = 5  // minutes
+	instanceAdjustNum       = 3  // instances
 	instanceMax             = 15
 	instanceMin             = 3
 	instanceThresholdUpper  = 100 // ms
@@ -346,15 +348,26 @@ func killZombies(etcdHost string, workers map[string]Worker) {
 func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan string, waitingDuration chan time.Duration, reloadWorkers chan struct{}) {
 	workers := make(map[string]Worker)
 
-	workerListChan := make(chan []string)
+	workerListChan := make(chan []string, 8)
 
-	reloadWorkerList := make(chan struct{})
+	reloadWorkerList := make(chan struct{}, 8)
 	go func() {
 		for {
 			reloadWorkerList <- struct{}{}
 			time.Sleep(instanceListInterval * time.Minute)
 		}
 	}()
+
+	adjustInstance := make(chan struct{}, 8)
+	go func() {
+		for {
+			time.Sleep(instanceAdjustInterval * time.Minute)
+			adjustInstance <- struct{}{}
+		}
+	}()
+
+	waitingDurNumer := 0
+	waitingDurDenom := 0
 
 	for {
 		select {
@@ -365,6 +378,8 @@ func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan strin
 				workers[workerName] = worker
 			}
 		case waitingDurationVal := <-waitingDuration:
+			waitingDurNumer += int(waitingDurationVal)
+			waitingDurDenom += 1
 			log.Printf("[MASTER] waiting duration: %d ms\n", waitingDurationVal/time.Millisecond)
 		case <-reloadWorkers:
 			redisConn := redisPool.Get()
@@ -392,7 +407,47 @@ func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan strin
 			}
 			log.Printf("[MASTER] %d workers found\n", len(workerList))
 			workers = newWorkers
+			if len(workers) == 0 {
+				adjustInstance <- struct{}{}
+			}
 			go killZombies(etcdHost, workers)
+		case <-adjustInstance:
+			log.Printf("[MASTER] start automatic instance creation/deletion\n")
+			log.Printf("[MASTER] available: %d workers\n", len(workers))
+			newInstanceNum := len(workers)
+			if waitingDurDenom == 0 {
+				newInstanceNum -= instanceAdjustNum
+			} else {
+				waitingDurAvr := waitingDurNumer / waitingDurDenom
+				if waitingDurAvr > int(instanceThresholdUpper*time.Millisecond) {
+					newInstanceNum += instanceAdjustNum
+				} else if waitingDurAvr < int(instanceThresholdLower*time.Millisecond) {
+					newInstanceNum -= instanceAdjustNum
+				}
+			}
+			newInstanceNum = imax(instanceMin, imin(instanceMax, newInstanceNum))
+			log.Printf("[MASTER] new instance number was decided to be %d\n", newInstanceNum)
+			waitingDurDenom = 0
+			waitingDurNumer = 0
+			diff := newInstanceNum - len(workers)
+			if diff > 0 {
+				go createWorkerInstances(etcdHost, diff)
+			} else {
+				rem := -diff
+				newWorkers := make(map[string]Worker)
+				for name, info := range workers {
+					if rem <= 0 {
+						break
+					}
+					if !info.Stopped {
+						stopWorker(name, redisPool)
+						info.Stopped = true
+						rem--
+					}
+					newWorkers[name] = info
+				}
+				workers = newWorkers
+			}
 		}
 	}
 }
