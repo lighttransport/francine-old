@@ -17,7 +17,7 @@ import (
 
 const (
 	redisMaxIdle            = 5
-	verbose                 = true
+	verbose                 = false
 	zone                    = "asia-east1-a"
 	machineType             = "n1-standard-1"
 	sessionTimeout          = 60 // minutes
@@ -54,7 +54,9 @@ func getEtcdValue(etcdHost, key string) (string, error) {
 
 	json.Unmarshal(body, &parsed)
 
-	log.Println("[MASTER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
+	if verbose {
+		log.Println("[MASTER] etcd host: " + etcdHost + ", value for " + key + " : " + parsed.Node.Value)
+	}
 
 	return parsed.Node.Value, nil
 }
@@ -380,7 +382,9 @@ func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan strin
 		case waitingDurationVal := <-waitingDuration:
 			waitingDurNumer += int(waitingDurationVal)
 			waitingDurDenom += 1
-			log.Printf("[MASTER] waiting duration: %d ms\n", waitingDurationVal/time.Millisecond)
+			if verbose {
+				log.Printf("[MASTER] waiting duration: %d ms\n", waitingDurationVal/time.Millisecond)
+			}
 		case <-reloadWorkers:
 			redisConn := redisPool.Get()
 			for workerName, _ := range workers {
@@ -417,8 +421,10 @@ func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan strin
 			newInstanceNum := len(workers)
 			if waitingDurDenom == 0 {
 				newInstanceNum -= instanceAdjustNum
+				log.Println("[MASTER] no waiting duration log found")
 			} else {
 				waitingDurAvr := waitingDurNumer / waitingDurDenom
+				log.Printf("[MASTER] average waiting duration: %d ms\n", waitingDurAvr/int(time.Millisecond))
 				if waitingDurAvr > int(instanceThresholdUpper*time.Millisecond) {
 					newInstanceNum += instanceAdjustNum
 				} else if waitingDurAvr < int(instanceThresholdLower*time.Millisecond) {
@@ -458,7 +464,9 @@ func cleanupSessions(redisPool *redis.Pool) {
 
 	for {
 		time.Sleep(sessionCleanupIntereval * time.Minute)
-		log.Println("[MASTER] clean up unused sessions ...")
+		if verbose {
+			log.Println("[MASTER] clean up unused sessions ...")
+		}
 
 		sessions, err := conn.Do("SMEMBERS", "session")
 		if err != nil {

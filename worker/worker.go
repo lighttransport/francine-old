@@ -19,7 +19,7 @@ const (
 	redisMaxIdle    = 5
 	lteAckTtl       = 3600 // one hour
 	pingIntervalMin = 1    // minutes
-	verbose         = true
+	verbose         = false
 	tmpPrefix       = "/tmp/lte"
 	cleanupInterval = 10 // minutes
 )

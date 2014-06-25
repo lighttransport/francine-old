@@ -338,7 +338,9 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 		}
 	}
 
-	log.Printf("[MASTER] putting resource %s (%d bytes)\n", resource, len(data))
+	if verbose {
+		log.Printf("[MASTER] putting resource %s (%d bytes)\n", resource, len(data))
+	}
 
 	hashBytes := sha256.Sum256(data)
 	hash := hex.EncodeToString(hashBytes[:])
@@ -358,10 +360,14 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 				break
 			}
 			time.Sleep(200 * time.Microsecond)
-			log.Printf("[MASTER] retry deleting resource %s\n", prevHash)
+			if verbose {
+				log.Printf("[MASTER] retry deleting resource %s\n", prevHash)
+			}
 		}
 		if !success {
-			log.Printf("[MASTER] failed to safely delete resource %s\n", prevHash)
+			if verbose {
+				log.Printf("[MASTER] failed to safely delete resource %s\n", prevHash)
+			}
 		}
 	}
 
