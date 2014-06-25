@@ -123,6 +123,19 @@ func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Poo
 	return
 }
 
+func doesSessionExist(session string, conn redis.Conn) (bool, error) {
+	res, err := conn.Do("EXISTS", "session:"+session+":input-json")
+	if err != nil {
+		return false, err
+	}
+
+	if res.(int64) == 1 {
+		return true, nil
+	} else {
+		return false, nil
+	}
+}
+
 /**
  * @api {put} /sessions/:sessionId/resources/:resourceName Add or update resource
  * @apiVersion 0.9.0
@@ -150,12 +163,39 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 	conn := redisPool.Get()
 	defer conn.Close()
 
-	// TODO: check whether the session exactly exists
+	var result struct {
+		Status string
+		Name   string
+		Hash   string
+		Size   int // Up to 2GB
+	}
 
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		raiseHttpError(w, err)
 		return
+	}
+
+	{
+		e, err := doesSessionExist(session, conn)
+		if err != nil {
+			raiseHttpError(w, err)
+			return
+		}
+
+		if e == false {
+			result.Status = "SessionDoesNotExist"
+
+			marshaled, err := json.Marshal(result)
+			if err != nil {
+				raiseHttpError(w, err)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(marshaled)
+		}
 	}
 
 	log.Printf("[MASTER] putting resource %s (%d bytes)\n", resource, len(data))
@@ -172,13 +212,6 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 	if _, err := conn.Do("EXEC"); err != nil {
 		raiseHttpError(w, err)
 		return
-	}
-
-	var result struct {
-		Status string
-		Name   string
-		Hash   string
-		Size   int // Up to 2GB
 	}
 
 	result.Status = "Ok"
