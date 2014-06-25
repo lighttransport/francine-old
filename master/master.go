@@ -22,6 +22,12 @@ const (
 	machineType             = "n1-standard-1"
 	sessionTimeout          = 60 // minutes
 	sessionCleanupIntereval = 10 // minutes
+	instanceListInterval    = 2  // minutes
+	instanceTimeout         = 10 // minutes
+	instanceMax             = 15
+	instanceMin             = 3
+	instanceThresholdUpper  = 100 // ms
+	instanceThresholdLower  = 20  // ms
 	//sessionTimeout          = 1 // minutes
 	//sessionCleanupIntereval = 2 // minutes
 )
@@ -274,22 +280,119 @@ func stopWorker(workerName string, redisPool *redis.Pool) error {
 	return nil
 }
 
-func manageWorkers(redisPool *redis.Pool, workerPing chan string, waitingDuration chan time.Duration, reloadWorkers chan struct{}) {
-	workers := make(map[string]struct{})
+func listWorkerInstances(etcdHost string) ([]string, error) {
+	transport, err := getTransportFromToken(etcdHost)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := transport.Client().Get(`https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/` + zone + `/instances?filter=name%20eq%20%27.%2Alte-worker.%2A%27`)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var unmarshaled struct {
+		Items []struct {
+			Name string `json:"name"`
+		} `json:"items"`
+	}
+	if err = json.Unmarshal(body, &unmarshaled); err != nil {
+		return nil, err
+	}
+
+	res := make([]string, 0)
+
+	for _, item := range unmarshaled.Items {
+		res = append(res, item.Name)
+	}
+
+	return res, nil
+}
+
+type Worker struct {
+	CreatedOn time.Time
+	PingOn    time.Time
+	Stopped   bool
+}
+
+func durMin(x, y time.Duration) time.Duration {
+	if x > y {
+		return y
+	} else {
+		return x
+	}
+}
+
+func killZombies(etcdHost string, workers map[string]Worker) {
+	now := time.Now()
+	log.Println("[MASTER] start zombie hunting...")
+	for name, info := range workers {
+		createdDur := now.Sub(info.CreatedOn)
+		pingDur := now.Sub(info.PingOn)
+		if durMin(createdDur, pingDur)/time.Minute > instanceTimeout {
+			log.Printf("[MASTER] %s is zombie; going to delete ...\n", name)
+			if err := deleteWorkerInstance(etcdHost, name); err != nil {
+				log.Fatalln(err)
+			}
+		}
+	}
+	log.Println("[MASTER] finished zombie hunting.")
+}
+
+func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan string, waitingDuration chan time.Duration, reloadWorkers chan struct{}) {
+	workers := make(map[string]Worker)
+
+	workerListChan := make(chan []string)
+
+	reloadWorkerList := make(chan struct{})
+	go func() {
+		for {
+			reloadWorkerList <- struct{}{}
+			time.Sleep(instanceListInterval * time.Minute)
+		}
+	}()
 
 	for {
 		select {
 		case workerName := <-workerPing:
-			log.Printf("[MASTER] ping from %s\n", workerName)
-			workers[workerName] = struct{}{}
+			// log.Printf("[MASTER] ping from %s\n", workerName)
+			if worker, ok := workers[workerName]; ok {
+				worker.PingOn = time.Now()
+				workers[workerName] = worker
+			}
 		case waitingDurationVal := <-waitingDuration:
 			log.Printf("[MASTER] waiting duration: %d ms\n", waitingDurationVal/time.Millisecond)
 		case <-reloadWorkers:
 			redisConn := redisPool.Get()
-			for worker, _ := range workers {
-				redisConn.Do("RPUSH", "cmd:"+worker, "restart")
+			for workerName, _ := range workers {
+				redisConn.Do("RPUSH", "cmd:"+workerName, "restart")
 			}
 			redisConn.Close()
+		case <-reloadWorkerList:
+			go func() {
+				lst, err := listWorkerInstances(etcdHost)
+				if err != nil {
+					log.Fatalln(err)
+				}
+				workerListChan <- lst
+			}()
+		case workerList := <-workerListChan:
+			newWorkers := make(map[string]Worker)
+			for _, workerName := range workerList {
+				prev, ok := workers[workerName]
+				if ok {
+					newWorkers[workerName] = prev
+				} else {
+					newWorkers[workerName] = Worker{CreatedOn: time.Now(), PingOn: time.Unix(0, 0)}
+				}
+			}
+			log.Printf("[MASTER] %d workers found\n", len(workerList))
+			workers = newWorkers
+			go killZombies(etcdHost, workers)
 		}
 	}
 }
@@ -357,7 +460,9 @@ func main() {
 	waitingDuration := make(chan time.Duration, 256)
 	reloadWorkers := make(chan struct{}, 256)
 
-	go manageWorkers(redisPool, workerPing, waitingDuration, reloadWorkers)
+	if etcdHost != "" {
+		go manageWorkers(etcdHost, redisPool, workerPing, waitingDuration, reloadWorkers)
+	}
 
 	go startRestServer(redisPool, waitingDuration)
 
