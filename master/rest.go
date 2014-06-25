@@ -103,7 +103,8 @@ func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Poo
 	}
 
 	conn.Send("MULTI")
-	conn.Send("SET", "session:"+result.SessionId+":modified", strconv.FormatInt(time.Now().UnixNano(), 10))
+	conn.Send("SADD", "session", result.SessionId)
+	conn.Send("SET", "session:"+result.SessionId+":modified", strconv.FormatInt(time.Now().Unix(), 10))
 	conn.Send("SET", "session:"+result.SessionId+":input-json", requestJson.InputJson)
 	if _, err := conn.Do("EXEC"); err != nil {
 		raiseHttpError(w, err)
@@ -187,6 +188,7 @@ func deleteSession(session string, conn redis.Conn) error {
 		conn.Send("MULTI")
 		conn.Send("GET", "session:"+session+":resource:"+member)
 		conn.Send("DEL", "session:"+session+":resource:"+member)
+		conn.Send("SREM", "session", session)
 		resp, err := conn.Do("EXEC")
 		if err != nil {
 			log.Printf("[MASTER] failed to delete %s\n", "session:"+session+":resource:"+member)
@@ -368,7 +370,7 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 	conn.Send("INCR", "resource:"+hash+":counter")
 	conn.Send("SET", "session:"+session+":resource:"+resource, hash)
 	conn.Send("SADD", "session:"+session+":resource", resource)
-	conn.Send("SET", "session:"+session+":modified", strconv.FormatInt(time.Now().UnixNano(), 10))
+	conn.Send("SET", "session:"+session+":modified", strconv.FormatInt(time.Now().Unix(), 10))
 	if _, err := conn.Do("EXEC"); err != nil {
 		raiseHttpError(w, err)
 		return
@@ -432,7 +434,7 @@ func generateRenderMessage(session string, redisPool *redis.Pool) (*Message, err
 	conn.Send("MULTI")
 	conn.Send("GET", "session:"+session+":input-json")
 	conn.Send("SMEMBERS", "session:"+session+":resource")
-	conn.Send("SET", "session:"+session+":modified", strconv.FormatInt(time.Now().UnixNano(), 10))
+	conn.Send("SET", "session:"+session+":modified", strconv.FormatInt(time.Now().Unix(), 10))
 	redisResp, err := conn.Do("EXEC")
 	if err != nil {
 		return nil, err

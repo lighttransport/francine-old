@@ -16,10 +16,14 @@ import (
 )
 
 const (
-	redisMaxIdle = 5
-	verbose      = true
-	zone         = "asia-east1-a"
-	machineType  = "n1-standard-1"
+	redisMaxIdle            = 5
+	verbose                 = true
+	zone                    = "asia-east1-a"
+	machineType             = "n1-standard-1"
+	sessionTimeout          = 60 // minutes
+	sessionCleanupIntereval = 10 // minutes
+	//sessionTimeout          = 1 // minutes
+	//sessionCleanupIntereval = 2 // minutes
 )
 
 func getEtcdValue(etcdHost, key string) (string, error) {
@@ -290,6 +294,41 @@ func manageWorkers(redisPool *redis.Pool, workerPing chan string, waitingDuratio
 	}
 }
 
+func cleanupSessions(redisPool *redis.Pool) {
+	conn := redisPool.Get()
+	defer conn.Close()
+
+	for {
+		time.Sleep(sessionCleanupIntereval * time.Minute)
+		log.Println("[MASTER] clean up unused sessions ...")
+
+		sessions, err := conn.Do("SMEMBERS", "session")
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		for _, session := range sessions.([]interface{}) {
+			sessionString := string(session.([]byte))
+			modified, err := conn.Do("GET", "session:"+sessionString+":modified")
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			modifiedUnix, err := strconv.ParseInt(string(modified.([]byte)), 10, 64)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			prev := time.Unix(modifiedUnix, 0)
+			if time.Now().Sub(prev) > sessionTimeout*time.Minute {
+				deleteSession(sessionString, conn)
+			}
+		}
+
+	}
+}
+
 func main() {
 	etcdHost := os.Getenv("ETCD_HOST")
 
@@ -317,9 +356,12 @@ func main() {
 	workerPing := make(chan string, 256)
 	waitingDuration := make(chan time.Duration, 256)
 	reloadWorkers := make(chan struct{}, 256)
+
 	go manageWorkers(redisPool, workerPing, waitingDuration, reloadWorkers)
 
 	go startRestServer(redisPool, waitingDuration)
+
+	go cleanupSessions(redisPool)
 
 	for {
 		redisConn := redisPool.Get()
