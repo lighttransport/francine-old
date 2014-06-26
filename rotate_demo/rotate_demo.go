@@ -10,13 +10,16 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
 	port         = "8080"
 	teapotPrefix = "../demo/scene"
-	parallel     = 4
+	parallel     = 1
+	fps          = 10
 )
 
 var lteHost = ""
@@ -67,6 +70,7 @@ func initLTE() (string, error) {
 		output := new(NewSessionOutput)
 		err = json.Unmarshal(body, output)
 		if err != nil {
+			log.Printf("json: %s\n", string(body))
 			return "", err
 		}
 		sessionId = output.SessionId
@@ -116,7 +120,7 @@ func releaseLTE(sessionId string) error {
 }
 
 func requestRender(sessionId string) ([]byte, error) {
-	resp, err := http.Post("http://"+lteHost+"/sessions/"+sessionId+"/renders", "text/plain", nil)
+	resp, err := http.Post("http://"+lteHost+"/sessions/"+sessionId+"/renders?parallel="+strconv.Itoa(parallel), "text/plain", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -137,35 +141,63 @@ func websockHandler(ws *websocket.Conn) {
 		return
 	}
 
-	var x, y, z float64 = 0.0, 20.0, 80.0
-	var omega float64 = 2.0 * math.Pi / 300.0
-	var theta float64 = 0.0
+	stop := make(chan struct{})
+	resultChan := make(chan []byte)
 
-	for {
-		websocket.Message.Receive(ws, nil)
-		result, err := requestRender(sessionId)
-		if err != nil {
-			log.Fatalln(err)
-		}
+	go func() {
+		var x, y, z float64 = 0.0, 20.0, 80.0
+		var omega float64 = 2.0 * math.Pi / (float64(fps) * 10.0)
+		var theta float64 = 0.0
 
-		z = 80.0 * math.Cos(theta)
-		x = 80.0 * math.Sin(theta)
-		theta = math.Mod(theta+omega, 2.0*math.Pi)
+		for {
+			select {
+			case <-stop:
+				close(resultChan)
+				break
+			default:
+				z = 80.0 * math.Cos(theta)
+				x = 80.0 * math.Sin(theta)
+				theta = math.Mod(theta+omega, 2.0*math.Pi)
 
-		err = putRotate(sessionId, x, y, z)
-		if err != nil {
-			log.Fatalln(err)
-		}
+				err = putRotate(sessionId, x, y, z)
+				if err != nil {
+					log.Fatalln(err)
+				}
 
-		if err := websocket.Message.Send(ws, result); err != nil {
-			log.Println("disconnected; release LTE")
-			err = releaseLTE(sessionId)
-			if err != nil {
-				log.Println(err)
+				time.Sleep(time.Second / fps)
+
+				go func() {
+					result, err := requestRender(sessionId)
+					if err != nil {
+						log.Fatalln(err)
+					}
+					resultChan <- result
+				}()
 			}
-			return
 		}
+	}()
+
+	for result := range resultChan {
+		if err != nil {
+			continue
+		}
+
+		websocket.Message.Receive(ws, nil)
+
+		err = websocket.Message.Send(ws, result)
+		if err != nil {
+			stop <- struct{}{}
+		}
+
 	}
+
+	log.Println("disconnected; release LTE")
+	err = releaseLTE(sessionId)
+	if err != nil {
+		log.Println(err)
+	}
+
+	return
 }
 
 func putRotate(sessionId string, x, y, z float64) error {

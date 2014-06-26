@@ -158,7 +158,7 @@ func safelyDeleteResource(hash string, conn redis.Conn) error {
 	if counter > 1 {
 		conn.Send("SET", "resource:"+hash+":counter", counter-1)
 	} else {
-		conn.Send("DEL", "resource:"+hash, "resource:"+hash+":counter")
+		//conn.Send("DEL", "resource:"+hash, "resource:"+hash+":counter")
 	}
 
 	resp, err := conn.Do("EXEC")

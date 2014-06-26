@@ -88,6 +88,9 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 				log.Println(err)
 				return
 			}
+			/*if _, ok := data.([]byte); !ok {
+				log.Printf("[WORKER] resource: %s message: %s\n", resource.Hash, string(msgBytes))
+			}*/
 			file.Write(data.([]byte))
 			file.Close()
 		}
