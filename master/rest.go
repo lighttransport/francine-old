@@ -406,154 +406,6 @@ func raiseHttpError(w http.ResponseWriter, err error) {
 	return
 }
 
-// writing these definitions twice should be removed in the future
-
-type Resource struct {
-	Name string
-	Hash string
-}
-
-type Message struct {
-	RenderId  string
-	SessionId string
-	InputJson string
-	Resources []Resource
-}
-
-type LteAck struct {
-	Status string
-	Log    string
-}
-
-type Result struct {
-	Err   error
-	Ack   []byte
-	Image []byte
-}
-
-func generateRenderMessage(session string, redisPool *redis.Pool) (*Message, error) {
-	conn := redisPool.Get()
-	defer conn.Close()
-
-	message := new(Message)
-
-	conn.Send("MULTI")
-	conn.Send("GET", "session:"+session+":input-json")
-	conn.Send("SMEMBERS", "session:"+session+":resource")
-	conn.Send("SET", "session:"+session+":modified", strconv.FormatInt(time.Now().Unix(), 10))
-	redisResp, err := conn.Do("EXEC")
-	if err != nil {
-		return nil, err
-	}
-
-	message.RenderId = strconv.FormatInt(time.Now().UnixNano(), 10)
-	message.SessionId = session
-	message.InputJson = string(redisResp.([]interface{})[0].([]byte))
-
-	for _, resourceNameBytes := range redisResp.([]interface{})[1].([]interface{}) {
-		resourceName := string(resourceNameBytes.([]byte))
-		if resp, err := conn.Do("GET", "session:"+session+":resource:"+resourceName); err != nil {
-			return nil, err
-		} else {
-			resourceHash := string(resp.([]byte))
-			message.Resources = append(message.Resources, Resource{resourceName, resourceHash})
-		}
-	}
-
-	return message, nil
-}
-
-func receiveLteAck(renderId string, conn redis.Conn) (*LteAck, []byte, error) {
-	var lteAckBytes []byte
-
-	for {
-		resp, err := conn.Do("BLPOP", "lte-ack:"+renderId, 0)
-
-		if resp != nil {
-			lteAckBytes = resp.([]interface{})[1].([]byte)
-			break
-		}
-
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	var lteAck LteAck
-	json.Unmarshal(lteAckBytes, &lteAck)
-
-	return &lteAck, lteAckBytes, nil
-}
-
-func requestRender(message *Message, redisPool *redis.Pool, res chan Result, waitingDuration chan time.Duration) {
-	conn := redisPool.Get()
-	defer conn.Close()
-
-	marshaled, err := json.Marshal(message)
-	if err != nil {
-		res <- Result{Err: err}
-		return
-	}
-
-	beginTime := time.Now()
-
-	if _, err := conn.Do("RPUSH", "render-queue", marshaled); err != nil {
-		res <- Result{Err: err}
-		return
-	}
-
-	for {
-		lteAck, lteAckBytes, err := receiveLteAck(message.RenderId, conn)
-		if err != nil {
-			res <- Result{Err: err}
-			return
-		}
-
-		switch lteAck.Status {
-		case "Start":
-			waitingDuration <- time.Now().Sub(beginTime)
-
-		case "Ok":
-			imageDataResp, err := conn.Do("GET", "render_image:"+message.RenderId)
-			if err != nil {
-				res <- Result{Err: err}
-				return
-			}
-
-			_, err = conn.Do("DEL", "render_image:"+message.RenderId, "lte-ack:"+message.RenderId)
-			if err != nil {
-				res <- Result{Err: err}
-				return
-			}
-
-			var imageDataJson struct {
-				JpegData string `json:"jpegdata"`
-			}
-
-			if err := json.Unmarshal(imageDataResp.([]byte), &imageDataJson); err != nil {
-				res <- Result{Err: err}
-				return
-			}
-
-			imageData, err := base64.StdEncoding.DecodeString(imageDataJson.JpegData)
-			if err != nil {
-				res <- Result{Err: err}
-				return
-			}
-
-			res <- Result{Image: imageData}
-			return
-
-		case "LinkError":
-			res <- Result{Ack: lteAckBytes}
-			return
-		default:
-			res <- Result{Err: errors.New("unknown lte-ack status: " + lteAck.Status)}
-			return
-		}
-	}
-}
-
 func composeImage(dst *draw.Image, src image.Image, ratio int) {
 	/*
 		out_A = src_A + dst_A(1 - src_A)
@@ -642,17 +494,13 @@ func divImage(dst []float32, n float32) {
 // 	waitingDuration chan time.Duration
 // }
 
-func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string, renderTimes int, waitingDuration chan time.Duration) {
+func restNewRender(w http.ResponseWriter, r *http.Request, request chan RenderRequest, session string, renderTimes int) {
 	// TODO: increment reference count of resources while renering is running
 
 	res := make(chan Result, renderTimes)
 
 	for i := 0; i < renderTimes; i++ {
-		message, err := generateRenderMessage(session, redisPool)
-		if err != nil {
-			raiseHttpError(w, err)
-		}
-		go requestRender(message, redisPool, res, waitingDuration)
+		request <- RenderRequest{SessionId: session, ResultChan: res}
 	}
 
 	var accum []float32 = nil
@@ -733,7 +581,7 @@ func imin(x, y int) int {
 	}
 }
 
-func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, waitingDuration chan time.Duration) {
+func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, waitingDuration chan time.Duration, requestChan chan RenderRequest) {
 	path := r.URL.Path
 
 	if verbose {
@@ -791,7 +639,7 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, 
 				log.Printf("[MASTER] renderTimes = %d\n", renderTimes)
 			}
 
-			restNewRender(w, r, redisPool, matched[1], renderTimes, waitingDuration)
+			restNewRender(w, r, requestChan, matched[1], renderTimes)
 			return
 		}
 	}
@@ -802,7 +650,178 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, 
 	return
 }
 
-func redisInit(redisPool *redis.Pool) {
+// writing these definitions twice should be removed in the future
+
+type Resource struct {
+	Name string
+	Hash string
+}
+
+type Message struct {
+	RenderId  string
+	SessionId string
+	InputJson string
+	Resources []Resource
+}
+
+type LteAck struct {
+	RenderId string
+	Status   string
+	Log      string
+}
+
+type Result struct {
+	Err   error
+	Ack   []byte
+	Image []byte
+}
+
+type ResultReceiver struct {
+	RenderId   string
+	ResultChan chan Result
+	BeginTime  time.Time
+}
+
+type RenderRequest struct {
+	SessionId  string
+	ResultChan chan Result
+}
+
+func readAllFromReceiver(receiver chan ResultReceiver, receivers *map[string]ResultReceiver) {
+	for {
+		select {
+		case recvVal := <-receiver:
+			(*receivers)[recvVal.RenderId] = recvVal
+		default:
+			return
+		}
+	}
+}
+
+func receiveRenderResult(receiver chan ResultReceiver, waitingDuration chan time.Duration, redisPool *redis.Pool) {
+	conn := redisPool.Get()
+	defer conn.Close()
+
+	resultReceivers := make(map[string]ResultReceiver)
+
+	for {
+		if verbose {
+			log.Println("[MASTER] waiting for lte-ack")
+		}
+		resp, err := conn.Do("BLPOP", "lte-ack", 0)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		readAllFromReceiver(receiver, &resultReceivers)
+
+		if resp != nil {
+			lteAckBytes := resp.([]interface{})[1].([]byte)
+
+			var lteAck LteAck
+			err = json.Unmarshal(lteAckBytes, &lteAck)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			if verbose {
+				log.Printf("[MASTER] lte-ack of type %s received\n", lteAck.Status)
+			}
+
+			receiver, ok := resultReceivers[lteAck.RenderId]
+			if !ok {
+				log.Println("[MASTER] couldn't match any result channels!")
+				continue
+			}
+
+			delete(resultReceivers, lteAck.RenderId)
+
+			switch lteAck.Status {
+			case "Start":
+				waitingDuration <- time.Now().Sub(receiver.BeginTime)
+
+				resultReceivers[receiver.RenderId] = receiver
+
+			case "Ok":
+				imageDataResp, err := conn.Do("GET", "render_image:"+receiver.RenderId)
+				if err != nil {
+					receiver.ResultChan <- Result{Err: err}
+					continue
+				}
+
+				_, err = conn.Do("DEL", "render_image:"+receiver.RenderId)
+				if err != nil {
+					receiver.ResultChan <- Result{Err: err}
+					continue
+				}
+
+				var imageDataJson struct {
+					JpegData string `json:"jpegdata"`
+				}
+
+				if err := json.Unmarshal(imageDataResp.([]byte), &imageDataJson); err != nil {
+					receiver.ResultChan <- Result{Err: err}
+					continue
+				}
+
+				imageData, err := base64.StdEncoding.DecodeString(imageDataJson.JpegData)
+				if err != nil {
+					receiver.ResultChan <- Result{Err: err}
+					continue
+				}
+
+				receiver.ResultChan <- Result{Image: imageData}
+
+			case "LinkError":
+				receiver.ResultChan <- Result{Ack: lteAckBytes}
+
+			default:
+				receiver.ResultChan <- Result{Err: errors.New("unknown lte-ack status: " + lteAck.Status)}
+			}
+
+		}
+	}
+}
+func dispatchRenderRequest(request *RenderRequest, conn redis.Conn) (string, error) {
+
+	conn.Send("MULTI")
+	conn.Send("GET", "session:"+request.SessionId+":input-json")
+	conn.Send("SMEMBERS", "session:"+request.SessionId+":resource")
+	conn.Send("SET", "session:"+request.SessionId+":modified", strconv.FormatInt(time.Now().Unix(), 10))
+	redisResp, err := conn.Do("EXEC")
+	if err != nil {
+		return "", err
+	}
+
+	message := Message{
+		RenderId:  strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionId: request.SessionId,
+		InputJson: string(redisResp.([]interface{})[0].([]byte))}
+
+	for _, resourceNameBytes := range redisResp.([]interface{})[1].([]interface{}) {
+		resourceName := string(resourceNameBytes.([]byte))
+		if resp, err := conn.Do("GET", "session:"+request.SessionId+":resource:"+resourceName); err != nil {
+			return "", err
+		} else {
+			resourceHash := string(resp.([]byte))
+			message.Resources = append(message.Resources, Resource{resourceName, resourceHash})
+		}
+	}
+
+	marshaled, err := json.Marshal(&message)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := conn.Do("RPUSH", "render-queue", marshaled); err != nil {
+		return "", err
+	}
+
+	return message.RenderId, nil
+}
+
+func interactWithRedis(requestChan chan RenderRequest, waitingDuration chan time.Duration, redisPool *redis.Pool) {
 	log.Println("[MASTER] init redis...")
 	conn := redisPool.Get()
 	defer conn.Close()
@@ -810,15 +829,45 @@ func redisInit(redisPool *redis.Pool) {
 		log.Println(err)
 	}
 	log.Println("[MASTER] initialized")
-	return
+
+	receiver := make(chan ResultReceiver, 256)
+
+	go receiveRenderResult(receiver, waitingDuration, redisPool)
+
+	for {
+		if verbose {
+			log.Println("[MASTER] waiting for request")
+		}
+
+		request := <-requestChan
+
+		if verbose {
+			log.Println("[MASTER] request received!")
+		}
+
+		renderId, err := dispatchRenderRequest(&request, conn)
+		if err != nil {
+			request.ResultChan <- Result{Err: err}
+			continue
+		}
+
+		if verbose {
+			log.Println("[MASTER] dispatched and result receiver set")
+		}
+
+		receiver <- ResultReceiver{RenderId: renderId, ResultChan: request.ResultChan, BeginTime: time.Now()}
+	}
+
 }
 
 func startRestServer(redisPool *redis.Pool, waitingDuration chan time.Duration) {
+	requestChan := make(chan RenderRequest, 256)
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		restHandler(w, r, redisPool, waitingDuration)
+		restHandler(w, r, redisPool, waitingDuration, requestChan)
 	})
 
-	go redisInit(redisPool)
+	go interactWithRedis(requestChan, waitingDuration, redisPool)
 
 	http.ListenAndServe(":80", nil)
 }

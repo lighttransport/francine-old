@@ -37,8 +37,9 @@ type Message struct {
 }
 
 type LteAck struct {
-	Status string
-	Log    string
+	RenderId string
+	Status   string
+	Log      string
 }
 
 func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redisPort string) {
@@ -53,7 +54,7 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 
 	json.Unmarshal(msgBytes, &message)
 
-	sendLteAck(&LteAck{Status: "Start"}, message.RenderId, conn)
+	sendLteAck(&LteAck{RenderId: message.RenderId, Status: "Start"}, conn)
 
 	resourceDir := tmpPrefix + "/renders/" + message.RenderId
 
@@ -120,7 +121,7 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 
 		if err := linkCheckCmd.Run(); err != nil {
 			if _, ok := err.(*exec.ExitError); ok {
-				sendLteAck(&LteAck{Status: "LinkError", Log: linkCheckOutput.String()}, message.RenderId, redisPool)
+				sendLteAck(&LteAck{RenderId: message.RenderId, Status: "LinkError", Log: linkCheckOutput.String()}, redisPool)
 				return
 			} else {
 				log.Fatalln(err)
@@ -146,7 +147,7 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 
 	if rendererErr != nil {
 		if _, ok := rendererErr.(*exec.ExitError); ok {
-			sendLteAck(&LteAck{Status: "LinkError", Log: rendererOutput.String()}, message.RenderId, conn)
+			sendLteAck(&LteAck{RenderId: message.RenderId, Status: "LinkError", Log: rendererOutput.String()}, conn)
 		} else {
 			log.Println(rendererErr)
 		}
@@ -154,7 +155,7 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 
 	timeAfterEverything := time.Now()
 
-	sendLteAck(&LteAck{Status: "Ok"}, message.RenderId, conn)
+	sendLteAck(&LteAck{RenderId: message.RenderId, Status: "Ok"}, conn)
 
 	if err := os.RemoveAll(resourceDir); err != nil {
 		log.Println(err)
@@ -171,11 +172,10 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 	return
 }
 
-func sendLteAck(data *LteAck, renderId string, conn redis.Conn) {
-	key := "lte-ack:" + renderId
+func sendLteAck(data *LteAck, conn redis.Conn) {
 	strData, _ := json.Marshal(data)
 
-	if _, err := conn.Do("RPUSH", key, strData); err != nil {
+	if _, err := conn.Do("RPUSH", "lte-ack", strData); err != nil {
 		log.Println(err)
 	}
 
