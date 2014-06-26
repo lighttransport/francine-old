@@ -32,7 +32,7 @@ coreos:
         Requires=registry.service etcd.service redis.service
         [Service]
         ExecStartPre=/usr/bin/docker pull 127.0.0.1:5001/lte_master
-        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /logentries-token 3dcfb8d1-04fc-4c81-97f7-ca43d05ff5a9; exit 0"
+        ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /logentries-token \"<logentries_token>\"; exit 0"
         ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /redis-server $private_ipv4:6379; exit 0"
         ExecStartPre=/bin/sh -xc "/usr/bin/etcdctl set /lte-worker-url $private_ipv4:5001/lte_worker; exit 0"
         ExecStart=/usr/bin/docker run -p 80:80 -e ETCD_HOST=172.17.42.1:4001 127.0.0.1:5001/lte_master /bin/master
@@ -59,9 +59,14 @@ coreos:
       content: |
         [Unit]
         Description=Redis
+        After=registry.service
+        Requires=registry.service
 
         [Service]
-        ExecStart=/usr/bin/docker run -p 6379:6379 dockerfile/redis
+        ExecStartPre=/usr/bin/docker pull 127.0.0.1:5001/redis
+        ExecStart=/usr/bin/docker run -p 6379:6379 127.0.0.1:5001/redis
+        Restart=always
+        RestartSec=30
 
         [Install]
         WantedBy=multi-user.target

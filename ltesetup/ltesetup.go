@@ -170,7 +170,7 @@ func ShowMasterIP() error {
 }
 
 func UpdateImages(masterInstance string, imageName string, withSudo bool) error {
-	images := []string{"lte_master", "lte_worker", "lte_demo"}
+	images := []string{"lte_master", "lte_worker", "lte_demo", "redis"}
 	if imageName != "" {
 		images = []string{imageName}
 	}
