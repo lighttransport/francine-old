@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,8 @@ const (
 	teapotPrefix = "../demo/scene"
 	parallel     = 1
 	fps          = 10
+	bufferSize   = 30
+	maxQueue     = 100
 )
 
 var lteHost = ""
@@ -97,6 +100,7 @@ func initLTE() (string, error) {
 		}
 	}
 
+	log.Println("lte initialized")
 	return sessionId, nil
 }
 
@@ -116,6 +120,7 @@ func releaseLTE(sessionId string) error {
 	if err != nil {
 		return err
 	}
+	log.Println("lte released")
 	return nil
 }
 
@@ -132,6 +137,80 @@ func requestRender(sessionId string) ([]byte, error) {
 	return body, nil
 }
 
+type Result struct {
+	Idx  int
+	Data []byte
+}
+
+type ResultSlice []Result
+
+func (rs ResultSlice) Len() int {
+	return len(rs)
+}
+
+func (rs ResultSlice) Less(i, j int) bool {
+	return rs[i].Idx < rs[j].Idx
+}
+
+func (rs ResultSlice) Swap(i, j int) {
+	rs[i], rs[j] = rs[j], rs[i]
+}
+
+func issueRequests(sessionId string, res chan Result, stop chan struct{}, last chan int) {
+	var x, y, z float64 = 0.0, 20.0, 80.0
+	var omega float64 = 2.0 * math.Pi / (float64(fps) * 10.0)
+	var theta float64 = 0.0
+
+	queued := 0
+	decrQueued := make(chan struct{}, 256)
+
+	for i := 0; ; i++ {
+		for {
+			ok := false
+			select {
+			case <-stop:
+				last <- (i - 1)
+				return
+			case <-decrQueued:
+				queued--
+			default:
+				ok = true
+			}
+			if ok {
+				break
+			}
+		}
+
+		if queued >= maxQueue {
+			log.Println("wait for relase of queue")
+			time.Sleep(time.Second)
+			continue
+		}
+
+		z = 80.0 * math.Cos(theta)
+		x = 80.0 * math.Sin(theta)
+		theta = math.Mod(theta+omega, 2.0*math.Pi)
+
+		err := putRotate(sessionId, x, y, z)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		time.Sleep(time.Second / fps)
+
+		queued++
+
+		go func(idx int) {
+			data, err := requestRender(sessionId)
+			if err != nil {
+				log.Fatalln(err)
+			}
+			res <- Result{Idx: idx, Data: data}
+			decrQueued <- struct{}{}
+		}(i)
+	}
+}
+
 func websockHandler(ws *websocket.Conn) {
 	log.Println("connection established")
 
@@ -142,51 +221,43 @@ func websockHandler(ws *websocket.Conn) {
 	}
 
 	stop := make(chan struct{})
-	resultChan := make(chan []byte)
+	res := make(chan Result, 256)
 
-	go func() {
-		var x, y, z float64 = 0.0, 20.0, 80.0
-		var omega float64 = 2.0 * math.Pi / (float64(fps) * 10.0)
-		var theta float64 = 0.0
+	last := make(chan int)
+	go issueRequests(sessionId, res, stop, last)
 
-		for {
-			select {
-			case <-stop:
-				close(resultChan)
-				break
-			default:
-				z = 80.0 * math.Cos(theta)
-				x = 80.0 * math.Sin(theta)
-				theta = math.Mod(theta+omega, 2.0*math.Pi)
+	buf := make(ResultSlice, 0)
 
-				err = putRotate(sessionId, x, y, z)
-				if err != nil {
-					log.Fatalln(err)
-				}
+	lastIdx := -1
 
-				time.Sleep(time.Second / fps)
-
-				go func() {
-					result, err := requestRender(sessionId)
-					if err != nil {
-						log.Fatalln(err)
-					}
-					resultChan <- result
-				}()
-			}
+	for result := range res {
+		if result.Idx == lastIdx {
+			break
 		}
-	}()
 
-	for result := range resultChan {
 		if err != nil {
 			continue
 		}
 
+		buf = append(buf, result)
+
+		if len(buf) < bufferSize {
+			log.Printf("len of buf %d, buffering ...", len(buf))
+			continue
+		}
+
+		sort.Sort(buf)
+
+		time.Sleep(time.Second * 4 / (fps * 3))
+
 		websocket.Message.Receive(ws, nil)
 
-		err = websocket.Message.Send(ws, result)
+		err = websocket.Message.Send(ws, buf[0].Data)
+		buf = buf[1:]
 		if err != nil {
+			log.Println(err)
 			stop <- struct{}{}
+			lastIdx = <-last
 		}
 
 	}
