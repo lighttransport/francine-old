@@ -76,11 +76,8 @@ type LteAck struct {
 	Log      string
 }
 
-func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redisPort string) {
+func kickRenderer(msgBytes []byte, conn redis.Conn, redisHost string, redisPort string) {
 	timeBeforeConn := time.Now()
-
-	conn := redisPool.Get()
-	defer conn.Close()
 
 	var message Message
 
@@ -324,8 +321,7 @@ func main() {
 
 			switch listName {
 			case "render-queue":
-				//go kickRenderer(popped, redisPool, redisHost, redisPort)
-				kickRenderer(popped, redisPool, redisHost, redisPort)
+				kickRenderer(popped, redisConn, redisHost, redisPort)
 			case cmdQueueName:
 				switch string(popped) {
 				case "stop":
