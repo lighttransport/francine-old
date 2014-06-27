@@ -211,6 +211,30 @@ func issueRequests(sessionId string, res chan Result, stop chan struct{}, last c
 	}
 }
 
+func obtainResultNonblocking(buf ResultSlice, res chan Result) ResultSlice {
+	changed := false
+	for {
+		select {
+		case r := <-res:
+			buf = append(buf, r)
+			changed = true
+		default:
+			if changed {
+				sort.Sort(buf)
+			}
+			return buf
+		}
+	}
+}
+
+func consumeRemaining(lastIdx int, res chan Result) {
+	for r := range res {
+		if r.Idx == lastIdx {
+			return
+		}
+	}
+}
+
 func websockHandler(ws *websocket.Conn) {
 	log.Println("connection established")
 
@@ -228,38 +252,27 @@ func websockHandler(ws *websocket.Conn) {
 
 	buf := make(ResultSlice, 0)
 
-	lastIdx := -1
-
-	for result := range res {
-		if result.Idx == lastIdx {
-			break
-		}
-
-		if err != nil {
-			continue
-		}
-
-		buf = append(buf, result)
-
-		if len(buf) < bufferSize {
-			log.Printf("len of buf %d, buffering ...", len(buf))
-			continue
-		}
-
-		sort.Sort(buf)
+	for {
+		buf = obtainResultNonblocking(buf, res)
 
 		time.Sleep(time.Second * 4 / (fps * 3))
 
-		websocket.Message.Receive(ws, nil)
-
-		err = websocket.Message.Send(ws, buf[0].Data)
-		buf = buf[1:]
-		if err != nil {
-			log.Println(err)
-			stop <- struct{}{}
-			lastIdx = <-last
+		if len(buf) < bufferSize {
+			log.Printf("len of buf %d, buffering ...", len(buf))
+			time.Sleep(time.Second)
+			continue
 		}
 
+		websocket.Message.Receive(ws, nil)
+
+		if err := websocket.Message.Send(ws, buf[0].Data); err != nil {
+			log.Println(err)
+			stop <- struct{}{}
+			consumeRemaining(<-last, res)
+			break
+		}
+
+		buf = buf[1:]
 	}
 
 	log.Println("disconnected; release LTE")
