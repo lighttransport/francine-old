@@ -140,7 +140,7 @@ func doesSessionExist(session string, conn redis.Conn) (bool, error) {
 	}
 }
 
-func safelyDeleteResource(hash string, conn redis.Conn) error {
+func releaseResource(hash string, conn redis.Conn) error {
 	if _, err := conn.Do("WATCH", "resource:"+hash, "resource:"+hash+":counter"); err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func safelyDeleteResource(hash string, conn redis.Conn) error {
 	if counter > 1 {
 		conn.Send("SET", "resource:"+hash+":counter", counter-1)
 	} else {
-		//conn.Send("DEL", "resource:"+hash, "resource:"+hash+":counter")
+		conn.Send("DEL", "resource:"+hash, "resource:"+hash+":counter")
 	}
 
 	resp, err := conn.Do("EXEC")
@@ -197,7 +197,7 @@ func deleteSession(session string, conn redis.Conn) error {
 
 		success := false
 		for i := 0; i < 5; i++ {
-			err = safelyDeleteResource(hash, conn)
+			err = releaseResource(hash, conn)
 			if err == nil {
 				success = true
 				break
@@ -206,7 +206,7 @@ func deleteSession(session string, conn redis.Conn) error {
 			time.Sleep(200 * time.Microsecond)
 		}
 		if !success {
-			log.Printf("[MASTER] failed to safely delete resource %s\n", hash)
+			log.Printf("[MASTER] failed to release resource %s\n", hash)
 		}
 	}
 	return nil
@@ -354,7 +354,7 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 	if prevHash != nil {
 		success := false
 		for i := 0; i < 5; i++ {
-			err = safelyDeleteResource(string(prevHash.([]byte)), conn)
+			err = releaseResource(string(prevHash.([]byte)), conn)
 			if err == nil {
 				success = true
 				break
@@ -366,7 +366,7 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 		}
 		if !success {
 			if verbose {
-				log.Printf("[MASTER] failed to safely delete resource %s\n", prevHash)
+				log.Printf("[MASTER] failed to release resource %s\n", prevHash)
 			}
 		}
 	}
@@ -794,6 +794,14 @@ func dispatchRenderRequest(request *RenderRequest, conn redis.Conn) (string, err
 		return "", err
 	}
 
+	if redisResp == nil {
+		return "", errors.New("result nil")
+	}
+
+	if redisResp.([]interface{})[0] == nil {
+		return "", errors.New("input-json nil; might be deleted session")
+	}
+
 	message := Message{
 		RenderId:  strconv.FormatInt(time.Now().UnixNano(), 10),
 		SessionId: request.SessionId,
@@ -807,6 +815,14 @@ func dispatchRenderRequest(request *RenderRequest, conn redis.Conn) (string, err
 			resourceHash := string(resp.([]byte))
 			message.Resources = append(message.Resources, Resource{resourceName, resourceHash})
 		}
+	}
+
+	conn.Send("MULTI")
+	for _, resource := range message.Resources {
+		conn.Send("INCR", "resource:"+resource.Hash+":counter")
+	}
+	if _, err := conn.Do("EXEC"); err != nil {
+		return "", err
 	}
 
 	marshaled, err := json.Marshal(&message)

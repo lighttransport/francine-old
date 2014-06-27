@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"github.com/garyburd/redigo/redis"
 	"io/ioutil"
 	"log"
@@ -23,6 +24,39 @@ const (
 	tmpPrefix       = "/tmp/lte"
 	cleanupInterval = 10 // minutes
 )
+
+// TODO: DRY
+func releaseResource(hash string, conn redis.Conn) error {
+	if _, err := conn.Do("WATCH", "resource:"+hash, "resource:"+hash+":counter"); err != nil {
+		return err
+	}
+	counterBytes, err := conn.Do("GET", "resource:"+hash+":counter")
+	if err != nil {
+		return err
+	}
+
+	counter, err := strconv.Atoi(string(counterBytes.([]byte)))
+	if err != nil {
+		return err
+	}
+
+	conn.Send("MULTI")
+	if counter > 1 {
+		conn.Send("SET", "resource:"+hash+":counter", counter-1)
+	} else {
+		conn.Send("DEL", "resource:"+hash, "resource:"+hash+":counter")
+	}
+
+	resp, err := conn.Do("EXEC")
+	if err != nil {
+		return err
+	}
+	if resp == nil {
+		return errors.New("optimistic locking failed")
+	}
+
+	return nil
+}
 
 type Resource struct {
 	Name string
@@ -88,11 +122,29 @@ func kickRenderer(msgBytes []byte, redisPool *redis.Pool, redisHost string, redi
 				log.Println(err)
 				return
 			}
-			/*if _, ok := data.([]byte); !ok {
-				log.Printf("[WORKER] resource: %s message: %s\n", resource.Hash, string(msgBytes))
-			}*/
+
+			if data == nil {
+				log.Printf("[WORKER] cannot obtain resource %s\n", resource.Hash)
+				return
+			}
+
 			file.Write(data.([]byte))
 			file.Close()
+
+			success := false
+			for i := 0; i < 5; i++ {
+				err = releaseResource(resource.Hash, conn)
+				if err == nil {
+					success = true
+					break
+				}
+				log.Printf("[WORKER] retry deleting resource %s\n", resource.Hash)
+				time.Sleep(200 * time.Microsecond)
+			}
+			if !success {
+				log.Printf("[WORKER] failed to release resource %s\n", resource.Hash)
+			}
+
 		}
 
 		// TODO: it has obvious security problem! be aware!
