@@ -20,10 +20,11 @@ const (
 	port         = "8080"
 	teapotPrefix = "../demo/scene"
 	parallel     = 1
-	fps          = 10
 	bufferSize   = 30
 	maxQueue     = 100
 )
+
+var fps = 10
 
 var lteHost = ""
 
@@ -196,7 +197,7 @@ func issueRequests(sessionId string, res chan Result, stop chan struct{}, last c
 			log.Fatalln(err)
 		}
 
-		time.Sleep(time.Second / fps)
+		time.Sleep(time.Second / time.Duration(fps))
 
 		queued++
 
@@ -255,11 +256,11 @@ func websockHandler(ws *websocket.Conn) {
 	for {
 		buf = obtainResultNonblocking(buf, res)
 
-		time.Sleep(time.Second * 4 / (fps * 3))
+		time.Sleep(time.Second * 4 / (time.Duration(fps) * 3))
 
 		if len(buf) < bufferSize {
 			log.Printf("len of buf %d, buffering ...", len(buf))
-			time.Sleep(time.Second)
+			time.Sleep(time.Second * 5)
 			continue
 		}
 
@@ -305,6 +306,14 @@ func main() {
 		log.Fatalln("please pass lte host in the argument")
 	}
 	lteHost = os.Args[1]
+	if len(os.Args) >= 3 {
+		var err error
+		fps, err = strconv.Atoi(os.Args[2])
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}
+	log.Printf("fps set to be %d\n", fps)
 
 	log.Printf("lte host: %s\n", lteHost)
 	http.Handle("/websock", websocket.Handler(websockHandler))
