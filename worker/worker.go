@@ -296,6 +296,8 @@ func main() {
 		log.Fatalln("please set WORKER_NAME")
 	}
 
+	log.Printf("[WORKER] starting worker %s ...\n", workerName)
+
 	redisUrl := os.Getenv("REDIS_HOST")
 	if redisUrl == "" {
 		log.Fatalln("please set REDIS_HOST")
@@ -331,9 +333,11 @@ func main() {
 				switch string(popped) {
 				case "stop":
 					redisConn.Close()
+					log.Printf("[WORKER] stopping worker %s ...\n", workerName)
 					os.Exit(0)
 				case "restart":
 					redisConn.Close()
+					log.Printf("[WORKER] restarting worker %s ...\n", workerName)
 					os.Exit(1)
 				}
 			}

@@ -23,9 +23,9 @@ const (
 	sessionTimeout          = 60 // minutes
 	sessionCleanupIntereval = 10 // minutes
 	instanceListInterval    = 2  // minutes
-	instanceTimeout         = 10 // minutes
-	instanceAdjustInterval  = 5  // minutes
-	instanceAdjustNum       = 3  // instances
+	instanceTimeout         = 3  // minutes
+	instanceAdjustInterval  = 3  // minutes
+	instanceAdjustNum       = 4  // instances
 	instanceMax             = 15
 	instanceMin             = 3
 	instanceThresholdUpper  = 100 // ms
@@ -337,6 +337,7 @@ func killZombies(etcdHost string, workers map[string]Worker) {
 	for name, info := range workers {
 		createdDur := now.Sub(info.CreatedOn)
 		pingDur := now.Sub(info.PingOn)
+		log.Printf("[MASTER] %s created %d min before, ping %d min before\n", name, createdDur/time.Minute, pingDur/time.Minute)
 		if durMin(createdDur, pingDur)/time.Minute > instanceTimeout {
 			log.Printf("[MASTER] %s is zombie; going to delete ...\n", name)
 			if err := deleteWorkerInstance(etcdHost, name); err != nil {
@@ -374,11 +375,15 @@ func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan strin
 	for {
 		select {
 		case workerName := <-workerPing:
-			// log.Printf("[MASTER] ping from %s\n", workerName)
+			log.Printf("[MASTER] ping from %s\n", workerName)
 			if worker, ok := workers[workerName]; ok {
-				worker.PingOn = time.Now()
-				workers[workerName] = worker
+				newWorker := worker
+				newWorker.PingOn = time.Now()
+				workers[workerName] = newWorker
+			} else {
+				log.Printf("[MASTER] unknown worker %s; ignore\n", workerName)
 			}
+
 		case waitingDurationVal := <-waitingDuration:
 			waitingDurNumer += int(waitingDurationVal)
 			waitingDurDenom += 1
@@ -404,6 +409,7 @@ func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan strin
 			for _, workerName := range workerList {
 				prev, ok := workers[workerName]
 				if ok {
+					log.Printf("[MASTER] inherited previous worker info for %s\n", workerName)
 					newWorkers[workerName] = prev
 				} else {
 					log.Printf("[MASTER] newly created worker %s detected\n", workerName)
@@ -443,8 +449,9 @@ func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan strin
 				rem := -diff
 				newWorkers := make(map[string]Worker)
 				for name, info := range workers {
+					newWorkers[name] = info
 					if rem <= 0 {
-						break
+						continue
 					}
 					if !info.Stopped {
 						stopWorker(name, redisPool)
