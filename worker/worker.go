@@ -253,6 +253,11 @@ func cleanResources(redisPool *redis.Pool) {
 		time.Sleep(cleanupInterval * time.Minute)
 		log.Println("[WORKER] clean up unused resources ...")
 
+		if err := os.MkdirAll(tmpPrefix+"/resources", 0755); err != nil {
+			log.Println(err)
+			return
+		}
+
 		// list up files in resource directory
 		files, err := ioutil.ReadDir(tmpPrefix + "/resources")
 		if err != nil {

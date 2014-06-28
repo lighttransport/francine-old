@@ -406,6 +406,7 @@ func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan strin
 				if ok {
 					newWorkers[workerName] = prev
 				} else {
+					log.Printf("[MASTER] newly created worker %s detected\n", workerName)
 					newWorkers[workerName] = Worker{CreatedOn: time.Now(), PingOn: time.Unix(0, 0)}
 				}
 			}
