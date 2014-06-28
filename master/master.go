@@ -456,8 +456,8 @@ func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan strin
 					if !info.Stopped {
 						stopWorker(name, redisPool)
 						info.Stopped = true
-						rem--
 					}
+					rem--
 					newWorkers[name] = info
 				}
 				workers = newWorkers
