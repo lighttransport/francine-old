@@ -100,9 +100,9 @@ func CreateMaster(instance, logentriesToken string) error {
 
 	if err = AddInstance(&InstConfig{
 		name: instance,
-		//zone:        "us-central1-a",
-		zone:        "asia-east1-a",
-		machineType: "n1-standard-1",
+		zone: "us-central1-a",
+		//zone:        "asia-east1-a",
+		machineType: "n1-highmem-2",
 		network:     "lte-cluster",
 		ipType:      "ephemeral",
 		cloudConfig: "cloud-config-master.yaml"}); err != nil {
