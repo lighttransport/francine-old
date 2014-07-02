@@ -21,10 +21,10 @@
 				avrDiv++;
 				document.getElementById("fps").innerHTML = ((avrNum / avrDiv) | 0).toString() + " FPS";
 				prev = cur;
-				websock.send("ack")
+				//websock.send("ack")
 			}
 			websock.onopen = function(event) {
-				websock.send("ack")
+				//websock.send("ack")
 			}
 		</script>
 	</head>

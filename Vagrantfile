@@ -28,4 +28,8 @@ SCRIPT
 
   config.vm.network "forwarded_port", guest: 7000, host: 7000, protocol: 'tcp'
   config.vm.network "forwarded_port", guest: 80, host: 8000, protocol: 'tcp'
+  config.vm.network "forwarded_port", guest: 8080, host: 8080, protocol: 'tcp'
+
+
+  config.vm.synced_folder "/Users/peryaudo/Desktop/SanMiguel", "/sanmiguel"
 end
