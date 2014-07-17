@@ -11,9 +11,19 @@ coreos:
 
         [Service]
         ExecStartPre=/bin/sh -xc "/usr/bin/docker pull <lte_worker_url>"
-        ExecStart=/bin/sh -xc "/usr/bin/docker run -e REDIS_HOST=<redis_server> -e WORKER_NAME=<hostname> -w /home/default <lte_worker_url> /bin/worker"
-        Restart=always
+        ExecStartPre=/bin/sh -xc "mkdir -p /tmp/lte"
+        ExecStart=/bin/sh -xc "/usr/bin/docker run -v /tmp/lte:/tmp/lte -e REDIS_HOST=<redis_server> -e WORKER_NAME=<hostname> -w /home/default <lte_worker_url> /bin/worker"
+        Restart=on-failure
         RestartSec=30
 
+        [Install]
+        WantedBy=multi-user.target
+    - name: send-log.service
+      command: start
+      content: |
+        [Unit]
+        Description=Send Log
+        [Service]
+        ExecStart=/bin/sh -xc "journalctl -o short -f | awk '{ print \"<logentries_token>\", $0; fflush(); }' | ncat data.logentries.com 10000"
         [Install]
         WantedBy=multi-user.target

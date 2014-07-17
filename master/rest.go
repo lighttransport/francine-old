@@ -102,7 +102,11 @@ func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Poo
 		log.Println("[MASTER] result marshaled")
 	}
 
-	if _, err := conn.Do("SET", "session:"+result.SessionId+":input-json", requestJson.InputJson); err != nil {
+	conn.Send("MULTI")
+	conn.Send("SADD", "session", result.SessionId)
+	conn.Send("SET", "session:"+result.SessionId+":modified", strconv.FormatInt(time.Now().Unix(), 10))
+	conn.Send("SET", "session:"+result.SessionId+":input-json", requestJson.InputJson)
+	if _, err := conn.Do("EXEC"); err != nil {
 		raiseHttpError(w, err)
 		return
 	}
@@ -120,6 +124,154 @@ func restNewSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Poo
 		log.Println("[MASTER] sent all data, finished")
 	}
 
+	return
+}
+
+func doesSessionExist(session string, conn redis.Conn) (bool, error) {
+	res, err := conn.Do("EXISTS", "session:"+session+":input-json")
+	if err != nil {
+		return false, err
+	}
+
+	if res.(int64) == 1 {
+		return true, nil
+	} else {
+		return false, nil
+	}
+}
+
+func releaseResource(hash string, conn redis.Conn) error {
+	if _, err := conn.Do("WATCH", "resource:"+hash, "resource:"+hash+":counter"); err != nil {
+		return err
+	}
+	counterBytes, err := conn.Do("GET", "resource:"+hash+":counter")
+	if err != nil {
+		return err
+	}
+
+	counter, err := strconv.Atoi(string(counterBytes.([]byte)))
+	if err != nil {
+		return err
+	}
+
+	conn.Send("MULTI")
+	if counter > 1 {
+		conn.Send("SET", "resource:"+hash+":counter", counter-1)
+	} else {
+		conn.Send("DEL", "resource:"+hash, "resource:"+hash+":counter")
+	}
+
+	resp, err := conn.Do("EXEC")
+	if err != nil {
+		return err
+	}
+	if resp == nil {
+		return errors.New("optimistic locking failed")
+	}
+
+	return nil
+}
+
+func deleteSession(session string, conn redis.Conn) error {
+	members, err := conn.Do("SMEMBERS", "session:"+session+":resource")
+	if err != nil {
+		return err
+	}
+	_, err = conn.Do("DEL", "session:"+session+":input-json", "session:"+session+":resource",
+		"session:"+session+":modified")
+	if err != nil {
+		return err
+	}
+	for _, memberBytes := range members.([]interface{}) {
+		member := string(memberBytes.([]byte))
+
+		conn.Send("MULTI")
+		conn.Send("GET", "session:"+session+":resource:"+member)
+		conn.Send("DEL", "session:"+session+":resource:"+member)
+		conn.Send("SREM", "session", session)
+		resp, err := conn.Do("EXEC")
+		if err != nil {
+			log.Printf("[MASTER] failed to delete %s\n", "session:"+session+":resource:"+member)
+		}
+		hash := string(resp.([]interface{})[0].([]byte))
+
+		success := false
+		for i := 0; i < 5; i++ {
+			err = releaseResource(hash, conn)
+			if err == nil {
+				success = true
+				break
+			}
+			log.Printf("[MASTER] retry deleting resource %s\n", hash)
+			time.Sleep(200 * time.Microsecond)
+		}
+		if !success {
+			log.Printf("[MASTER] failed to release resource %s\n", hash)
+		}
+	}
+	return nil
+}
+
+/**
+ * @api {delete} /sessions/:SessionId delete session
+ * @apiVersion 0.9.0
+ * @apiName NewSession
+ * @apiGroup Render
+ *
+ * @apiSuccess {String} Status "OK" if success.
+ *
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *     {
+ *       "Status": "Ok"
+ *     }
+ *
+ */
+func restDeleteSession(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string) {
+	conn := redisPool.Get()
+	defer conn.Close()
+	var result struct {
+		Status string
+	}
+	{
+		e, err := doesSessionExist(session, conn)
+		if err != nil {
+			raiseHttpError(w, err)
+			return
+		}
+
+		if e == false {
+			result.Status = "SessionDoesNotExist"
+
+			marshaled, err := json.Marshal(result)
+			if err != nil {
+				raiseHttpError(w, err)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(marshaled)
+			return
+		}
+	}
+
+	if err := deleteSession(session, conn); err != nil {
+		raiseHttpError(w, err)
+		return
+	}
+
+	result.Status = "Ok"
+
+	marshaled, err := json.Marshal(result)
+	if err != nil {
+		raiseHttpError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(marshaled)
 	return
 }
 
@@ -150,7 +302,12 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 	conn := redisPool.Get()
 	defer conn.Close()
 
-	// TODO: check whether the session exactly exists
+	var result struct {
+		Status string
+		Name   string
+		Hash   string
+		Size   int // Up to 2GB
+	}
 
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -158,27 +315,71 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 		return
 	}
 
-	log.Printf("[MASTER] putting resource %s (%d bytes)\n", resource, len(data))
+	{
+		e, err := doesSessionExist(session, conn)
+		if err != nil {
+			raiseHttpError(w, err)
+			return
+		}
+
+		if e == false {
+			result.Status = "SessionDoesNotExist"
+
+			marshaled, err := json.Marshal(result)
+			if err != nil {
+				raiseHttpError(w, err)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(marshaled)
+			return
+		}
+	}
+
+	if verbose {
+		log.Printf("[MASTER] putting resource %s (%d bytes)\n", resource, len(data))
+	}
 
 	hashBytes := sha256.Sum256(data)
 	hash := hex.EncodeToString(hashBytes[:])
 
-	// TODO: use WATCH to safely and effectively perform these operations
+	prevHash, err := conn.Do("GET", "session:"+session+":resource:"+resource)
+	if err != nil {
+		raiseHttpError(w, err)
+		return
+	}
+
+	if prevHash != nil {
+		success := false
+		for i := 0; i < 5; i++ {
+			err = releaseResource(string(prevHash.([]byte)), conn)
+			if err == nil {
+				success = true
+				break
+			}
+			time.Sleep(200 * time.Microsecond)
+			if verbose {
+				log.Printf("[MASTER] retry deleting resource %s\n", prevHash)
+			}
+		}
+		if !success {
+			if verbose {
+				log.Printf("[MASTER] failed to release resource %s\n", prevHash)
+			}
+		}
+	}
+
 	conn.Send("MULTI")
 	conn.Send("SET", "resource:"+hash, data)
 	conn.Send("INCR", "resource:"+hash+":counter")
 	conn.Send("SET", "session:"+session+":resource:"+resource, hash)
 	conn.Send("SADD", "session:"+session+":resource", resource)
+	conn.Send("SET", "session:"+session+":modified", strconv.FormatInt(time.Now().Unix(), 10))
 	if _, err := conn.Do("EXEC"); err != nil {
 		raiseHttpError(w, err)
 		return
-	}
-
-	var result struct {
-		Status string
-		Name   string
-		Hash   string
-		Size   int		// Up to 2GB
 	}
 
 	result.Status = "Ok"
@@ -203,138 +404,6 @@ func raiseHttpError(w http.ResponseWriter, err error) {
 	log.Println(err)
 	http.Error(w, err.Error(), http.StatusInternalServerError)
 	return
-}
-
-// writing these definitions twice should be removed in the future
-
-type Resource struct {
-	Name string
-	Hash string
-}
-
-type Message struct {
-	RenderId  string
-	SessionId string
-	InputJson string
-	Resources []Resource
-}
-
-type LteAck struct {
-	Status string
-	Log    string
-}
-
-type Result struct {
-	Err   error
-	Ack   []byte
-	Image []byte
-}
-
-func generateRenderMessage(session string, redisPool *redis.Pool) (*Message, error) {
-	conn := redisPool.Get()
-	defer conn.Close()
-
-	message := new(Message)
-
-	conn.Send("MULTI")
-	conn.Send("GET", "session:"+session+":input-json")
-	conn.Send("SMEMBERS", "session:"+session+":resource")
-	redisResp, err := conn.Do("EXEC")
-	if err != nil {
-		return nil, err
-	}
-
-	message.RenderId = strconv.FormatInt(time.Now().UnixNano(), 10)
-	message.SessionId = session
-	message.InputJson = string(redisResp.([]interface{})[0].([]byte))
-
-	for _, resourceNameBytes := range redisResp.([]interface{})[1].([]interface{}) {
-		resourceName := string(resourceNameBytes.([]byte))
-		if resp, err := conn.Do("GET", "session:"+session+":resource:"+resourceName); err != nil {
-			return nil, err
-		} else {
-			resourceHash := string(resp.([]byte))
-			message.Resources = append(message.Resources, Resource{resourceName, resourceHash})
-		}
-	}
-
-	return message, nil
-}
-
-func requestRender(message *Message, redisPool *redis.Pool, res chan Result) {
-	conn := redisPool.Get()
-	defer conn.Close()
-
-	marshaled, err := json.Marshal(message)
-	if err != nil {
-		res <- Result{Err: err}
-		return
-	}
-
-	if _, err := conn.Do("RPUSH", "render-queue", marshaled); err != nil {
-		res <- Result{Err: err}
-		return
-	}
-
-	var lteAckBytes []byte
-
-	for {
-		resp, err := conn.Do("BLPOP", "lte-ack:"+message.RenderId, 0)
-
-		if resp != nil {
-			lteAckBytes = resp.([]interface{})[1].([]byte)
-			break
-		}
-
-		if err != nil {
-			res <- Result{Err: err}
-			return
-		}
-	}
-
-	var lteAck LteAck
-	json.Unmarshal(lteAckBytes, &lteAck)
-
-	switch lteAck.Status {
-	case "Ok":
-		imageDataResp, err := conn.Do("GET", "render_image:"+message.RenderId)
-		if err != nil {
-			res <- Result{Err: err}
-			return
-		}
-
-        // Delete the image after 30 min
-		_, err = conn.Do("EXPIRE", "render_image:"+message.RenderId, 1800)
-		if err != nil {
-			res <- Result{Err: err}
-			return
-		}
-
-		var imageDataJson struct {
-			JpegData string `json:"jpegdata"`
-		}
-
-		if err := json.Unmarshal(imageDataResp.([]byte), &imageDataJson); err != nil {
-			res <- Result{Err: err}
-			return
-		}
-
-		imageData, err := base64.StdEncoding.DecodeString(imageDataJson.JpegData)
-		if err != nil {
-			res <- Result{Err: err}
-			return
-		}
-
-		res <- Result{Image: imageData}
-		return
-
-	case "LinkError":
-		res <- Result{Ack: lteAckBytes}
-		return
-	default:
-		res <- Result{Err: errors.New("unknown lte-ack status: " + lteAck.Status)}
-		return
-	}
 }
 
 func composeImage(dst *draw.Image, src image.Image, ratio int) {
@@ -365,12 +434,12 @@ func clamp(f float32) uint16 {
 	return uint16(i)
 }
 
-func accumulateImage(dst* []float32, src image.Image) {
+func accumulateImage(dst *[]float32, src image.Image) {
 
 	inBounds := src.Bounds()
 
 	if *dst == nil {
-		*dst = make([]float32, inBounds.Dx() * inBounds.Dy() * 4)
+		*dst = make([]float32, inBounds.Dx()*inBounds.Dy()*4)
 	}
 
 	var w = inBounds.Dx()
@@ -395,7 +464,6 @@ func divImage(dst []float32, n float32) {
 	}
 }
 
-
 /**
  * @api {post} /sessions/:sessionId/renders Run rendering
  * @apiVersion 0.9.0
@@ -417,17 +485,22 @@ func divImage(dst []float32, n float32) {
  *
  */
 
-func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string, renderTimes int) {
+// type Render struct {
+// 	w              http.ResponseWriter
+// 	r              *http.Request
+// 	redisPool      *redis.Pool
+// 	session        string
+// 	renderTimes    int
+// 	waitingDuration chan time.Duration
+// }
+
+func restNewRender(w http.ResponseWriter, r *http.Request, request chan RenderRequest, session string, renderTimes int) {
 	// TODO: increment reference count of resources while renering is running
 
 	res := make(chan Result, renderTimes)
 
 	for i := 0; i < renderTimes; i++ {
-		message, err := generateRenderMessage(session, redisPool)
-		if err != nil {
-			raiseHttpError(w, err)
-		}
-		go requestRender(message, redisPool, res)
+		request <- RenderRequest{SessionId: session, ResultChan: res}
 	}
 
 	var accum []float32 = nil
@@ -464,20 +537,20 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 
 	divImage(accum, float32(renderTimes))
 
-    outimg := image.NewRGBA(bounds)
+	outimg := image.NewRGBA(bounds)
 
-    var width = bounds.Dx()
+	var width = bounds.Dx()
 
-    for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-        for x := bounds.Min.X; x < bounds.Max.X; x++ {
-            r := accum[4*(y*width+x)+0]
-            g := accum[4*(y*width+x)+1]
-            b := accum[4*(y*width+x)+2]
-            a := accum[4*(y*width+x)+3]
-            rgba := color.RGBA64{clamp(r), clamp(g), clamp(b), clamp(a)}
-            outimg.Set(x, y, rgba)
-        }
-    }
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r := accum[4*(y*width+x)+0]
+			g := accum[4*(y*width+x)+1]
+			b := accum[4*(y*width+x)+2]
+			a := accum[4*(y*width+x)+3]
+			rgba := color.RGBA64{clamp(r), clamp(g), clamp(b), clamp(a)}
+			outimg.Set(x, y, rgba)
+		}
+	}
 
 	var resBuf bytes.Buffer
 
@@ -493,7 +566,22 @@ func restNewRender(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool
 	return
 }
 
-func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) {
+func imax(x, y int) int {
+	if x > y {
+		return x
+	} else {
+		return y
+	}
+}
+func imin(x, y int) int {
+	if x > y {
+		return y
+	} else {
+		return x
+	}
+}
+
+func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, waitingDuration chan time.Duration, requestChan chan RenderRequest) {
 	path := r.URL.Path
 
 	if verbose {
@@ -506,6 +594,16 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 				log.Println("[MASTER] request dispatched")
 			}
 			restNewSession(w, r, redisPool)
+			return
+		}
+	}
+
+	if matched := regexp.MustCompile("^/sessions/(.+)$").FindStringSubmatch(path); matched != nil {
+		if r.Method == "DELETE" {
+			if verbose {
+				log.Println("[MASTER] request dispatched")
+			}
+			restDeleteSession(w, r, redisPool, matched[1])
 			return
 		}
 	}
@@ -526,26 +624,22 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 				log.Println("[MASTER] request dispatched")
 			}
 			m, _ := url.ParseQuery(r.URL.RawQuery)
-		
+
 			renderTimes := 1
 			if m["parallel"] != nil {
 				n, err := strconv.Atoi(m["parallel"][0])
 				if err == nil {
 					renderTimes = n
-
-					// clamp
-					if renderTimes < 1 {
-						renderTimes = 1
-					} else if renderTimes > 256 {
-						renderTimes = 256
-					}
 				}
 			}
+
+			renderTimes = imin(imax(renderTimes, 1), 256)
+
 			if verbose {
-				log.Println("[MASTER] renderTimes = %d", renderTimes)
+				log.Printf("[MASTER] renderTimes = %d\n", renderTimes)
 			}
 
-			restNewRender(w, r, redisPool, matched[1], renderTimes)
+			restNewRender(w, r, requestChan, matched[1], renderTimes)
 			return
 		}
 	}
@@ -556,7 +650,194 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool) 
 	return
 }
 
-func redisInit(redisPool *redis.Pool) {
+// writing these definitions twice should be removed in the future
+
+type Resource struct {
+	Name string
+	Hash string
+}
+
+type Message struct {
+	RenderId  string
+	SessionId string
+	InputJson string
+	Resources []Resource
+}
+
+type LteAck struct {
+	RenderId string
+	Status   string
+	Log      string
+}
+
+type Result struct {
+	Err   error
+	Ack   []byte
+	Image []byte
+}
+
+type ResultReceiver struct {
+	RenderId   string
+	ResultChan chan Result
+	BeginTime  time.Time
+}
+
+type RenderRequest struct {
+	SessionId  string
+	ResultChan chan Result
+}
+
+func readAllFromReceiver(receiver chan ResultReceiver, receivers *map[string]ResultReceiver) {
+	for {
+		select {
+		case recvVal := <-receiver:
+			(*receivers)[recvVal.RenderId] = recvVal
+		default:
+			return
+		}
+	}
+}
+
+func receiveRenderResult(receiver chan ResultReceiver, waitingDuration chan time.Duration, redisPool *redis.Pool) {
+	conn := redisPool.Get()
+	defer conn.Close()
+
+	resultReceivers := make(map[string]ResultReceiver)
+
+	for {
+		if verbose {
+			log.Println("[MASTER] waiting for lte-ack")
+		}
+		resp, err := conn.Do("BLPOP", "lte-ack", 0)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		readAllFromReceiver(receiver, &resultReceivers)
+
+		if resp != nil {
+			lteAckBytes := resp.([]interface{})[1].([]byte)
+
+			var lteAck LteAck
+			err = json.Unmarshal(lteAckBytes, &lteAck)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			if verbose {
+				log.Printf("[MASTER] lte-ack of type %s received\n", lteAck.Status)
+			}
+
+			receiver, ok := resultReceivers[lteAck.RenderId]
+			if !ok {
+				log.Println("[MASTER] couldn't match any result channels!")
+				continue
+			}
+
+			delete(resultReceivers, lteAck.RenderId)
+
+			switch lteAck.Status {
+			case "Start":
+				waitingDuration <- time.Now().Sub(receiver.BeginTime)
+
+				resultReceivers[receiver.RenderId] = receiver
+
+			case "Ok":
+				imageDataResp, err := conn.Do("GET", "render_image:"+receiver.RenderId)
+				if err != nil {
+					receiver.ResultChan <- Result{Err: err}
+					continue
+				}
+
+				_, err = conn.Do("DEL", "render_image:"+receiver.RenderId)
+				if err != nil {
+					receiver.ResultChan <- Result{Err: err}
+					continue
+				}
+
+				var imageDataJson struct {
+					JpegData string `json:"jpegdata"`
+				}
+
+				if err := json.Unmarshal(imageDataResp.([]byte), &imageDataJson); err != nil {
+					receiver.ResultChan <- Result{Err: err}
+					continue
+				}
+
+				imageData, err := base64.StdEncoding.DecodeString(imageDataJson.JpegData)
+				if err != nil {
+					receiver.ResultChan <- Result{Err: err}
+					continue
+				}
+
+				receiver.ResultChan <- Result{Image: imageData}
+
+			case "LinkError":
+				receiver.ResultChan <- Result{Ack: lteAckBytes}
+
+			default:
+				receiver.ResultChan <- Result{Err: errors.New("unknown lte-ack status: " + lteAck.Status)}
+			}
+
+		}
+	}
+}
+func dispatchRenderRequest(request *RenderRequest, conn redis.Conn) (string, error) {
+
+	conn.Send("MULTI")
+	conn.Send("GET", "session:"+request.SessionId+":input-json")
+	conn.Send("SMEMBERS", "session:"+request.SessionId+":resource")
+	conn.Send("SET", "session:"+request.SessionId+":modified", strconv.FormatInt(time.Now().Unix(), 10))
+	redisResp, err := conn.Do("EXEC")
+	if err != nil {
+		return "", err
+	}
+
+	if redisResp == nil {
+		return "", errors.New("result nil")
+	}
+
+	if redisResp.([]interface{})[0] == nil {
+		return "", errors.New("input-json nil; might be deleted session")
+	}
+
+	message := Message{
+		RenderId:  strconv.FormatInt(time.Now().UnixNano(), 10),
+		SessionId: request.SessionId,
+		InputJson: string(redisResp.([]interface{})[0].([]byte))}
+
+	for _, resourceNameBytes := range redisResp.([]interface{})[1].([]interface{}) {
+		resourceName := string(resourceNameBytes.([]byte))
+		if resp, err := conn.Do("GET", "session:"+request.SessionId+":resource:"+resourceName); err != nil {
+			return "", err
+		} else {
+			resourceHash := string(resp.([]byte))
+			message.Resources = append(message.Resources, Resource{resourceName, resourceHash})
+		}
+	}
+
+	conn.Send("MULTI")
+	for _, resource := range message.Resources {
+		conn.Send("INCR", "resource:"+resource.Hash+":counter")
+	}
+	if _, err := conn.Do("EXEC"); err != nil {
+		return "", err
+	}
+
+	marshaled, err := json.Marshal(&message)
+	if err != nil {
+		return "", err
+	}
+
+	if _, err := conn.Do("RPUSH", "render-queue", marshaled); err != nil {
+		return "", err
+	}
+
+	return message.RenderId, nil
+}
+
+func interactWithRedis(requestChan chan RenderRequest, waitingDuration chan time.Duration, redisPool *redis.Pool) {
 	log.Println("[MASTER] init redis...")
 	conn := redisPool.Get()
 	defer conn.Close()
@@ -564,15 +845,45 @@ func redisInit(redisPool *redis.Pool) {
 		log.Println(err)
 	}
 	log.Println("[MASTER] initialized")
-	return
+
+	receiver := make(chan ResultReceiver, 256)
+
+	go receiveRenderResult(receiver, waitingDuration, redisPool)
+
+	for {
+		if verbose {
+			log.Println("[MASTER] waiting for request")
+		}
+
+		request := <-requestChan
+
+		if verbose {
+			log.Println("[MASTER] request received!")
+		}
+
+		renderId, err := dispatchRenderRequest(&request, conn)
+		if err != nil {
+			request.ResultChan <- Result{Err: err}
+			continue
+		}
+
+		if verbose {
+			log.Println("[MASTER] dispatched and result receiver set")
+		}
+
+		receiver <- ResultReceiver{RenderId: renderId, ResultChan: request.ResultChan, BeginTime: time.Now()}
+	}
+
 }
 
-func startRestServer(redisPool *redis.Pool) {
+func startRestServer(redisPool *redis.Pool, waitingDuration chan time.Duration) {
+	requestChan := make(chan RenderRequest, 256)
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		restHandler(w, r, redisPool)
+		restHandler(w, r, redisPool, waitingDuration, requestChan)
 	})
 
-	go redisInit(redisPool)
+	go interactWithRedis(requestChan, waitingDuration, redisPool)
 
 	http.ListenAndServe(":80", nil)
 }

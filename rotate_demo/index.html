@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset=utf-8>
+		<title>Light Transport Engine REST API Rotate Demo</title>
+		<script>
+			var websock = new WebSocket("ws://" + location.host + "/websock");
+			var prev = new Date().getTime();
+			var avrNum = 0;
+			var avrDiv = 0;
+			websock.binaryType = "blob";
+			websock.onmessage = function(event) {
+				var fr = new FileReader();
+				fr.onload = function(e) {
+					document.getElementById("image").src = e.target.result;
+				}
+				fr.readAsDataURL(event.data);
+				var cur = new Date().getTime();
+				var elp = cur - prev;
+				avrNum += (1000 / (cur - prev)) | 0;
+				avrDiv++;
+				document.getElementById("fps").innerHTML = ((avrNum / avrDiv) | 0).toString() + " FPS";
+				prev = cur;
+				websock.send("ack")
+			}
+			websock.onopen = function(event) {
+				websock.send("ack")
+			}
+		</script>
+	</head>
+	<body>
+	<div id="fps"></div>
+	<div><img id="image"></div>
+	</body>
+</html>

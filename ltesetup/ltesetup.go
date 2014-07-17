@@ -7,10 +7,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
-	"time"
 	"strconv"
+	"strings"
+	"time"
 )
 
 type InstConfig struct {
@@ -77,15 +79,27 @@ func CheckFiles(files []string) error {
 	return nil
 }
 
-func CreateMaster(instance string) error {
+func CreateMaster(instance, logentriesToken string) error {
 	reqs := []string{"cloud-config-master.yaml"}
 	var err error
 	if err = CheckFiles(reqs); err != nil {
 		return err
 	}
 
+	cloudConfig, err := ioutil.ReadFile("cloud-config-master.yaml")
+	if err != nil {
+		return err
+	}
+
+	cloudConfigReplaced := []byte(strings.Replace(string(cloudConfig), "<logentries_token>", logentriesToken, -1))
+	if err = ioutil.WriteFile("cloud-config-master.yaml", cloudConfigReplaced, 0644); err != nil {
+		return err
+	}
+
+	defer ioutil.WriteFile("cloud-config-master.yaml", cloudConfig, 0644)
+
 	if err = AddInstance(&InstConfig{
-		name:        instance,
+		name: instance,
 		//zone:        "us-central1-a",
 		zone:        "asia-east1-a",
 		machineType: "n1-standard-1",
@@ -99,11 +113,7 @@ func CreateMaster(instance string) error {
 }
 
 func SendCreateWorker(masterInstance string, num int) error {
-	cmd := ""
-	for i := 0; i < num; i++ {
-		cmd += "sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush cmd:lte-master create\n"
-	}
-	return SendCommand(masterInstance, cmd)
+	return SendCommand(masterInstance, "sudo docker run relateiq/redis-cli -h `sudo printenv COREOS_PRIVATE_IPV4` rpush cmd:lte-master create:"+strconv.Itoa(num))
 }
 
 func RestartWorkers(masterInstance string) error {
@@ -121,18 +131,18 @@ func RestartDemo(masterInstance string) error {
 
 func DeleteWorkers() error {
 	lst := exec.Command("gcutil", "listinstances", "--format", "names", "--project", "gcp-samples", "--filter=name eq '.*lte-worker.*'")
-    // without -n, it hangs for deleting 100 or more nodes at a time.
-	delinst := exec.Command("xargs", "-n", "16", "gcutil", "deleteinstance", "--force", "--delete_boot_pd"); // --force option needs also specify delete persistent disk option(--[no]delete_boot_pd)
+	// without -n, it hangs for deleting 100 or more nodes at a time.
+	delinst := exec.Command("xargs", "-n", "16", "gcutil", "deleteinstance", "--force", "--delete_boot_pd") // --force option needs also specify delete persistent disk option(--[no]delete_boot_pd)
 
-    delinst.Stdin, _ = lst.StdoutPipe()
-    lst.Stderr = os.Stderr
-    delinst.Stdout = os.Stdout
-    delinst.Stderr = os.Stderr
-    if err := delinst.Start(); err != nil {
+	delinst.Stdin, _ = lst.StdoutPipe()
+	lst.Stderr = os.Stderr
+	delinst.Stdout = os.Stdout
+	delinst.Stderr = os.Stderr
+	if err := delinst.Start(); err != nil {
 		return err
-    }
+	}
 
-    if err := lst.Run(); err != nil {
+	if err := lst.Run(); err != nil {
 		return err
 	}
 
@@ -159,9 +169,8 @@ func ShowMasterIP() error {
 	return cmd.Run()
 }
 
-
-func UpdateImages(masterInstance string, imageName string) error {
-	images := []string{"lte_master", "lte_worker", "lte_demo"}
+func UpdateImages(masterInstance string, imageName string, withSudo bool) error {
+	images := []string{"lte_master", "lte_worker", "lte_demo", "redis"}
 	if imageName != "" {
 		images = []string{imageName}
 	}
@@ -176,23 +185,32 @@ func UpdateImages(masterInstance string, imageName string) error {
 	time.Sleep(15 * time.Second)
 
 	for _, image := range images {
-		fmt.Println("francine:info\tmsg:updating image > "+image)
-		cmd := exec.Command("docker", "tag", "lighttransport/"+image, "127.0.0.1:5001/"+image)
+		fmt.Println("francine:info\tmsg:updating image > " + image)
+		var cmd *exec.Cmd
+		if withSudo {
+			cmd = exec.Command("sudo", "docker", "tag", "lighttransport/"+image, "127.0.0.1:5001/"+image)
+		} else {
+			cmd = exec.Command("docker", "tag", "lighttransport/"+image, "127.0.0.1:5001/"+image)
+		}
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
 			fmt.Println("francine:err\tmsg:docker tag failed")
-			ssh.Process.Kill(); // @todo err check
+			ssh.Process.Kill() // @todo err check
 			return err
 		}
-		cmd = exec.Command("docker", "push", "127.0.0.1:5001/"+image)
+		if withSudo {
+			cmd = exec.Command("sudo", "docker", "push", "127.0.0.1:5001/"+image)
+		} else {
+			cmd = exec.Command("docker", "push", "127.0.0.1:5001/"+image)
+		}
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Stdin = os.Stdin
 		if err := cmd.Run(); err != nil {
 			fmt.Println("francine:err\tmsg:docker push failed")
-			ssh.Process.Kill(); // @todo err check
+			ssh.Process.Kill() // @todo err check
 			return err
 		}
 	}
@@ -244,7 +262,7 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s [<options>] <command>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, `commands:
-	create_master : Create the master instance in GCE
+	create_master <logentries token>: Create the master instance in GCE
 	update_images : Update docker images
 	delete_master : Delete the master instance in GCE
 	create_worker <N> : Create a worker instance in GCE(N workers if N was specified)
@@ -263,12 +281,15 @@ How to Setup:
 	./ltesetup auth <client id> <client secret>
 	./ltesetup create_worker
 
+options:
 `)
 		// create_network
 		// delete_worker
 
 		flag.PrintDefaults()
 	}
+
+	withSudo := flag.Bool("with-sudo", false, "execute local Docker with sudo")
 
 	flag.Parse()
 
@@ -284,7 +305,12 @@ How to Setup:
 	/*case "create_network":
 	err = CreateNetwork("lte-cluster")*/
 	case "create_master":
-		err = CreateMaster("lte-master")
+		if flag.NArg() < 2 {
+			fmt.Fprintf(os.Stderr, "%s: too few arguments\n", os.Args[0])
+			flag.Usage()
+			os.Exit(1)
+		}
+		err = CreateMaster("lte-master", flag.Args()[1])
 	case "delete_master":
 		err = DeleteInstance("lte-master")
 	case "update_images":
@@ -292,17 +318,14 @@ How to Setup:
 		if len(flag.Args()) >= 2 {
 			imageName = flag.Args()[1]
 		}
-		err = UpdateImages("lte-master", imageName)
+		err = UpdateImages("lte-master", imageName, *withSudo)
 	case "create_worker":
 		num := 1
 		if len(flag.Args()) >= 2 {
 			num, err = strconv.Atoi(flag.Args()[1])
-			if err == nil {
-				if num < 1 {
-					num = 1;
-				} else if num > 16 {
-					num = 16;
-				}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "cannot parse the number of created workers")
+				os.Exit(1)
 			}
 
 		}
