@@ -1,6 +1,17 @@
 #cloud-config
 hostname: lte-master
 
+write_files:
+  - path: /home/core/master-setup.sh
+    permissions: '0744'
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      #
+      # Limit log size of journald
+      sed 's/#\(SystemMaxUse=\).*/\164M/' -i /etc/systemd/journald.conf
+      sed 's/#\(SystemMaxFileSize=\).*/\164M/' -i /etc/systemd/journald.conf
+
 coreos:
   etcd:
     name: lte-master
@@ -9,6 +20,17 @@ coreos:
   units:
     - name: etcd.service
       command: start
+    - name: master-setup.service
+      content: |
+        [Unit]
+        Description=Setup Master node configuration
+        After=systemd-journald.service
+
+        [Service]
+        ExecStart=/bin/bash /home/core/master-setup.sh
+
+        [Install]
+        WantedBy=multi-user.target
     - name: registry.service
       command: start
       content: |
