@@ -490,6 +490,10 @@ func cleanupSessions(redisPool *redis.Pool) {
 				log.Println(err)
 				return
 			}
+			if modified == nil {
+				// FIXME: dirty fix
+				continue
+			}
 			modifiedUnix, err := strconv.ParseInt(string(modified.([]byte)), 10, 64)
 			if err != nil {
 				log.Println(err)
