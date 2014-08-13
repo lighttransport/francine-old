@@ -20,14 +20,14 @@ const (
 	redisMaxIdle            = 5
 	verbose                 = false
 	zone                    = "us-central1-a"
-	machineType             = "n1-highcpu-4"
+	machineType             = "n1-highcpu-16"
 	sessionTimeout          = 60 // minutes
 	sessionCleanupIntereval = 10 // minutes
 	instanceListInterval    = 2  // minutes
 	instanceTimeout         = 3  // minutes
 	instanceAdjustInterval  = 3  // minutes
 	instanceAdjustNum       = 5  // instances
-	instanceMax             = 45
+	instanceMax             = 10
 	instanceMin             = 5
 	instanceThresholdUpper  = 100 // ms
 	instanceThresholdLower  = 20  // ms
