@@ -17,16 +17,33 @@ import (
 )
 
 const (
-	port         = "8080"
-	teapotPrefix = "../demo/scene"
-	parallel     = 1
-	bufferSize   = 30
-	maxQueue     = 100
+	port            = "8080"
+	parallel        = 1
+	lowerBufferSize = 30
+	upperBufferSize = 100
+	maxQueue        = 100
 )
 
-var fps = 10
+var (
+	lteHost  = ""
+	modelDir = ""
+	fps      = 10
+)
 
-var lteHost = ""
+var (
+	replacedContent = ""
+	replacedDst     = "scene/teapot_redis.json"
+)
+
+type Package struct {
+	InputJson string
+	Resources []Resource
+}
+
+type Resource struct {
+	Src string
+	Dst string
+}
 
 type NewSessionInput struct {
 	InputJson string
@@ -54,54 +71,70 @@ func putResource(sessionId, name string, content []byte) error {
 	return nil
 }
 
-func initLTE() (string, error) {
-	sessionId := ""
-	{
-		input := &NewSessionInput{InputJson: "scene/teapot_redis.json"}
-		inputBytes, err := json.Marshal(input)
-		if err != nil {
-			return "", err
-		}
-		resp, err := http.Post("http://"+lteHost+"/sessions", "application/json", bytes.NewBuffer(inputBytes))
-		if err != nil {
-			return "", err
-		}
-		defer resp.Body.Close()
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return "", err
-		}
-		output := new(NewSessionOutput)
-		err = json.Unmarshal(body, output)
-		if err != nil {
-			log.Printf("json: %s\n", string(body))
-			return "", err
-		}
-		sessionId = output.SessionId
+func registerSession(inputJson string) (string, error) {
+	input := &NewSessionInput{InputJson: inputJson}
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.Post("http://"+lteHost+"/sessions", "application/json", bytes.NewBuffer(inputBytes))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	output := new(NewSessionOutput)
+	err = json.Unmarshal(body, output)
+	if err != nil {
+		log.Printf("json: %s\n", string(body))
+		return "", err
 	}
 
-	files := [][]string{
-		[]string{"scene/teapot_redis.json", "teapot_redis.json"},
-		[]string{"scene/teapot_scene.json", "teapot_scene.json"},
-		[]string{"scene/teapot.material.json", "teapot.material.json"},
-		[]string{"scene/shaders.json", "shaders.json"},
-		[]string{"scene/teapot.mesh", "teapot.mesh"},
-		[]string{"shader.c", "shader.c"},
-		[]string{"shader.h", "shader.h"},
-		[]string{"procedural-noise.c", "procedural-noise.c"},
-		[]string{"light.h", "light.h"}}
+	return output.SessionId, nil
+}
 
-	for _, file := range files {
-		fileBytes, err := ioutil.ReadFile(teapotPrefix + "/" + file[1])
+func initLTE(modelName string) (string, error) {
+	modelPrefix := modelDir + "/" + modelName
+
+	var model Package
+
+	// TODO: check whether modelName included in models.json
+	packageBytes, err := ioutil.ReadFile(modelPrefix + "/package.json")
+	if err != nil {
+		return "", err
+	}
+
+	err = json.Unmarshal(packageBytes, &model)
+	if err != nil {
+		return "", err
+	}
+
+	sessionId, err := registerSession(model.InputJson)
+	if err != nil {
+		return "", err
+	}
+
+	for _, resource := range model.Resources {
+		fileBytes, err := ioutil.ReadFile(modelPrefix + "/" + resource.Src)
 		if err != nil {
 			return "", err
 		}
-		if err = putResource(sessionId, file[0], fileBytes); err != nil {
+
+		err = putResource(sessionId, resource.Dst, fileBytes)
+		if err != nil {
 			return "", err
+		}
+
+		if resource.Dst == replacedDst {
+			replacedContent = string(fileBytes)
 		}
 	}
 
 	log.Println("lte initialized")
+
 	return sessionId, nil
 }
 
@@ -117,11 +150,14 @@ func releaseLTE(sessionId string) error {
 		return err
 	}
 	defer resp.Body.Close()
+
 	_, err = ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
+
 	log.Println("lte released")
+
 	return nil
 }
 
@@ -131,10 +167,12 @@ func requestRender(sessionId string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
+
 	return body, nil
 }
 
@@ -159,11 +197,13 @@ func (rs ResultSlice) Swap(i, j int) {
 
 func issueRequests(sessionId string, res chan Result, stop chan struct{}, last chan int) {
 	var x, y, z float64 = 0.0, 20.0, 80.0
-	var omega float64 = 2.0 * math.Pi / (float64(fps) * 10.0)
+	var omega float64 = 2.0 * math.Pi / (float64(fps) * 5.0)
 	var theta float64 = 0.0
 
 	queued := 0
 	decrQueued := make(chan struct{}, 256)
+
+	lastTime := time.Now()
 
 	for i := 0; ; i++ {
 		for {
@@ -197,7 +237,9 @@ func issueRequests(sessionId string, res chan Result, stop chan struct{}, last c
 			log.Fatalln(err)
 		}
 
-		time.Sleep(time.Second / time.Duration(fps))
+		time.Sleep(time.Second/time.Duration(fps) - time.Now().Sub(lastTime))
+
+		lastTime = time.Now()
 
 		queued++
 
@@ -239,7 +281,7 @@ func consumeRemaining(lastIdx int, res chan Result) {
 func websockHandler(ws *websocket.Conn) {
 	log.Println("connection established")
 
-	sessionId, err := initLTE()
+	sessionId, err := initLTE("teapot")
 	if err != nil {
 		log.Println(err)
 		return
@@ -253,18 +295,38 @@ func websockHandler(ws *websocket.Conn) {
 
 	buf := make(ResultSlice, 0)
 
+	buffering := true
+
+	beginTime := time.Now()
+	passed := 0
+
 	for {
+		prev := len(buf)
 		buf = obtainResultNonblocking(buf, res)
+		cur := len(buf)
+		passed += cur - prev
 
-		time.Sleep(time.Second * 4 / (time.Duration(fps) * 3))
+		if passed == 0 {
+			time.Sleep(time.Second)
+		} else {
+			time.Sleep(time.Now().Sub(beginTime) / time.Duration(passed))
+		}
 
-		if len(buf) < bufferSize {
+		if len(buf) < lowerBufferSize {
+			buffering = true
+		}
+
+		if len(buf) > upperBufferSize {
+			buffering = false
+		}
+
+		if buffering {
 			log.Printf("len of buf %d, buffering ...", len(buf))
-			time.Sleep(time.Second * 5)
+			time.Sleep(time.Second * 1)
 			continue
 		}
 
-		websocket.Message.Receive(ws, nil)
+		//websocket.Message.Receive(ws, nil)
 
 		if err := websocket.Message.Send(ws, buf[0].Data); err != nil {
 			log.Println(err)
@@ -286,15 +348,11 @@ func websockHandler(ws *websocket.Conn) {
 }
 
 func putRotate(sessionId string, x, y, z float64) error {
-	mainJsonBytes, err := ioutil.ReadFile(teapotPrefix + "/teapot_redis.json")
-	if err != nil {
-		return err
-	}
-	mainJsonReplaced := []byte(strings.Replace(string(mainJsonBytes),
+	afterReplaced := []byte(strings.Replace(replacedContent,
 		`    "eye" : [0.0, 20.0, 80.0],`,
 		fmt.Sprintf(`    "eye": [%f, %f, %f],`, x, y, z), -1))
 
-	err = putResource(sessionId, "scene/teapot_redis.json", mainJsonReplaced)
+	err := putResource(sessionId, replacedDst, afterReplaced)
 	if err != nil {
 		return err
 	}
@@ -302,17 +360,16 @@ func putRotate(sessionId string, x, y, z float64) error {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatalln("please pass lte host in the argument")
+	modelDir = os.Getenv("MODEL_DIR")
+	if modelDir == "" {
+		log.Fatalln("please set MODEL_DIR")
 	}
-	lteHost = os.Args[1]
-	if len(os.Args) >= 3 {
-		var err error
-		fps, err = strconv.Atoi(os.Args[2])
-		if err != nil {
-			log.Fatalln(err)
-		}
+
+	lteHost = os.Getenv("LTE_HOST")
+	if lteHost == "" {
+		log.Fatalln("please set LTE_HOST")
 	}
+
 	log.Printf("fps set to be %d\n", fps)
 
 	log.Printf("lte host: %s\n", lteHost)

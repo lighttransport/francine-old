@@ -16,18 +16,19 @@ import (
 )
 
 const (
+	//zone                  = "asia-east1-a"
 	redisMaxIdle            = 5
 	verbose                 = false
-	zone                    = "asia-east1-a"
-	machineType             = "n1-standard-1"
+	zone                    = "us-central1-a"
+	machineType             = "n1-highcpu-16"
 	sessionTimeout          = 60 // minutes
 	sessionCleanupIntereval = 10 // minutes
 	instanceListInterval    = 2  // minutes
 	instanceTimeout         = 3  // minutes
 	instanceAdjustInterval  = 3  // minutes
-	instanceAdjustNum       = 4  // instances
-	instanceMax             = 15
-	instanceMin             = 3
+	instanceAdjustNum       = 5  // instances
+	instanceMax             = 10
+	instanceMin             = 5
 	instanceThresholdUpper  = 100 // ms
 	instanceThresholdLower  = 20  // ms
 	//sessionTimeout          = 1 // minutes
@@ -488,6 +489,10 @@ func cleanupSessions(redisPool *redis.Pool) {
 			if err != nil {
 				log.Println(err)
 				return
+			}
+			if modified == nil {
+				// FIXME: dirty fix
+				continue
 			}
 			modifiedUnix, err := strconv.ParseInt(string(modified.([]byte)), 10, 64)
 			if err != nil {
