@@ -28,7 +28,7 @@ const (
 	instanceAdjustInterval  = 3  // minutes
 	instanceAdjustNum       = 5  // instances
 	instanceMax             = 10
-	instanceMin             = 5
+	instanceMin             = 0
 	instanceThresholdUpper  = 100 // ms
 	instanceThresholdLower  = 20  // ms
 	//sessionTimeout          = 1 // minutes
