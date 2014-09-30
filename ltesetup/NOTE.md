@@ -1,3 +1,4 @@
 - Try to use replica pool to create multiple workers at a time: https://developers.google.com/compute/docs/replica-pool/
 - Use 5001(external) and 5000(in the container) for docker registory service
 - Need to add localhost entry in /etc/hosts otherwise golang(?) failed to lookup localhost in CoreOS.
+- registry doesn't see STORAGE_PATH for local or dev FLAVOR? It writes data to /tmp. Thus add workaround to use /tmp for persistent volume. 

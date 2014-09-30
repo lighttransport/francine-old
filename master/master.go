@@ -20,6 +20,7 @@ const (
 	redisMaxIdle            = 5
 	verbose                 = false
 	zone                    = "us-central1-a"
+	baseMachineType         = "n1-highcpu-2"
 	machineType             = "n1-highcpu-16"
 	sessionTimeout          = 60 // minutes
 	sessionCleanupIntereval = 10 // minutes
@@ -27,8 +28,8 @@ const (
 	instanceTimeout         = 3  // minutes
 	instanceAdjustInterval  = 3  // minutes
 	instanceAdjustNum       = 5  // instances
-	instanceMax             = 10
-	instanceMin             = 5
+	instanceMax             = 12
+	instanceMin             = 1
 	instanceThresholdUpper  = 100 // ms
 	instanceThresholdLower  = 20  // ms
 	//sessionTimeout          = 1 // minutes
@@ -99,7 +100,7 @@ func getTransportFromToken(etcdHost string) (*oauth.Transport, error) {
 	return &transport, nil
 }
 
-func createWorkerInstances(etcdHost string, number int) {
+func createWorkerInstances(etcdHost string, number int, currInstances int) {
 	tokenUrl, err := getEtcdValue(etcdHost, "lte-worker-url")
 	if err != nil {
 		log.Fatal(err)
@@ -127,7 +128,11 @@ func createWorkerInstances(etcdHost string, number int) {
 
 	for i := 0; i < number; i++ {
 		instanceName := "lte-worker-" + strings.Replace(time.Now().Format("20060102150405.000"), ".", "", -1)
-		go createWorkerInstancesInternal(*transport, instanceName, tokenUrl, redisServer, logentriesToken, cloudConfig)
+		machineName := machineType
+		if i == 0 && currInstances == 0 { // first worker instance
+			machineName = baseMachineType
+		}
+		go createWorkerInstancesInternal(*transport, instanceName, machineName, tokenUrl, redisServer, logentriesToken, cloudConfig)
 		time.Sleep(300 * time.Millisecond)
 	}
 }
@@ -169,7 +174,7 @@ func getDiskState(transport oauth.Transport, diskName string) (int, error) {
 	}
 }
 
-func createWorkerInstancesInternal(transport oauth.Transport, instanceName, tokenUrl, redisServer, logentriesToken, cloudConfig string) {
+func createWorkerInstancesInternal(transport oauth.Transport, instanceName, machineName, tokenUrl, redisServer, logentriesToken, cloudConfig string) {
 
 	cloudConfig = strings.Replace(cloudConfig, "<hostname>", instanceName, -1)
 	cloudConfig = strings.Replace(cloudConfig, "<lte_worker_url>", tokenUrl, -1)
@@ -237,7 +242,7 @@ func createWorkerInstancesInternal(transport oauth.Transport, instanceName, toke
 		"scheduling": map[string]interface{}{
 			"automaticRestart":  true,
 			"onHostMaintenance": "MIGRATE"},
-		"machineType": "https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/" + zone + "/machineTypes/" + machineType,
+		"machineType": "https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/" + zone + "/machineTypes/" + machineName,
 		"name":        instanceName,
 		"serviceAccounts": []interface{}{
 			map[string]interface{}{
@@ -445,7 +450,7 @@ func manageWorkers(etcdHost string, redisPool *redis.Pool, workerPing chan strin
 			waitingDurNumer = 0
 			diff := newInstanceNum - len(workers)
 			if diff > 0 {
-				go createWorkerInstances(etcdHost, diff)
+				go createWorkerInstances(etcdHost, diff, len(workers))
 			} else {
 				rem := -diff
 				newWorkers := make(map[string]Worker)
@@ -564,7 +569,7 @@ func main() {
 						continue
 					}
 				}
-				go createWorkerInstances(etcdHost, number)
+				go createWorkerInstances(etcdHost, number, /* fixme */0)
 			case "ping":
 				workerPing <- split[1]
 			case "restart_workers":
