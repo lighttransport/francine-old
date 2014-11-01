@@ -27,12 +27,12 @@ import (
  *
  * An "apiDefinePermission"-block can have an "apiVersion", so you can attach the block to a specific version.
  *
- * @apiVersion 0.9.0
+ * @apiVersion v0
  */
 
 /**
  * @api {post} /sessions Create new session
- * @apiVersion 0.9.0
+ * @apiVersion v0
  * @apiName NewSession
  * @apiGroup Render
  *
@@ -214,7 +214,7 @@ func deleteSession(session string, conn redis.Conn) error {
 
 /**
  * @api {delete} /sessions/:SessionId delete session
- * @apiVersion 0.9.0
+ * @apiVersion v0
  * @apiName NewSession
  * @apiGroup Render
  *
@@ -277,7 +277,7 @@ func restDeleteSession(w http.ResponseWriter, r *http.Request, redisPool *redis.
 
 /**
  * @api {put} /sessions/:sessionId/resources/:resourceName Add or update resource
- * @apiVersion 0.9.0
+ * @apiVersion v0
  * @apiName EditResource
  * @apiGroup Render
  *
@@ -400,6 +400,117 @@ func restEditResource(w http.ResponseWriter, r *http.Request, redisPool *redis.P
 	return
 }
 
+/**
+ * @api {patch} /sessions/:sessionId/resource Update resource
+ * @apiVersion v0
+ * @apiName UpdateResource
+ * @apiGroup Render
+ *
+ * @apiParam {JSON} Input JSON patch.
+ *
+ * @apiSuccess {String} Status "OK" if success.
+ *
+ * @apiSuccessExample Success-Response:
+ *     HTTP/1.1 200 OK
+ *     {
+ *       "Status": "OK",
+ *     }
+ *
+ */
+func restPatchResource(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, session string) {
+	conn := redisPool.Get()
+	defer conn.Close()
+
+	var result struct {
+		Status string
+	}
+
+	data, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		raiseHttpError(w, err)
+		return
+	}
+
+	{
+		e, err := doesSessionExist(session, conn)
+		if err != nil {
+			raiseHttpError(w, err)
+			return
+		}
+
+		if e == false {
+			result.Status = "SessionDoesNotExist"
+
+			marshaled, err := json.Marshal(result)
+			if err != nil {
+				raiseHttpError(w, err)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(marshaled)
+			return
+		}
+	}
+
+	if verbose {
+		log.Printf("[MASTER] patching resource for session %s (%d bytes)\n", session, len(data))
+	}
+
+	// @todo {}
+	//prevHash, err := conn.Do("GET", "session:"+session+":resource:"+resource)
+	//if err != nil {
+	//	raiseHttpError(w, err)
+	//	return
+	//}
+
+	//if prevHash != nil {
+	//	success := false
+	//	for i := 0; i < 5; i++ {
+	//		err = releaseResource(string(prevHash.([]byte)), conn)
+	//		if err == nil {
+	//			success = true
+	//			break
+	//		}
+	//		time.Sleep(200 * time.Microsecond)
+	//		if verbose {
+	//			log.Printf("[MASTER] retry deleting resource %s\n", prevHash)
+	//		}
+	//	}
+	//	if !success {
+	//		if verbose {
+	//			log.Printf("[MASTER] failed to release resource %s\n", prevHash)
+	//		}
+	//	}
+	//}
+
+	//conn.Send("MULTI")
+	//conn.Send("SET", "resource:"+hash, data)
+	//conn.Send("INCR", "resource:"+hash+":counter")
+	//conn.Send("SET", "session:"+session+":resource:"+resource, hash)
+	//conn.Send("SADD", "session:"+session+":resource", resource)
+	//conn.Send("SET", "session:"+session+":modified", strconv.FormatInt(time.Now().Unix(), 10))
+	//if _, err := conn.Do("EXEC"); err != nil {
+	//	raiseHttpError(w, err)
+	//	return
+	//}
+
+	result.Status = "Ok"
+
+	marshaled, err := json.Marshal(result)
+	if err != nil {
+		raiseHttpError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(marshaled)
+
+	return
+}
+
 func raiseHttpError(w http.ResponseWriter, err error) {
 	log.Println(err)
 	http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -466,7 +577,7 @@ func divImage(dst []float32, n float32) {
 
 /**
  * @api {post} /sessions/:sessionId/renders Run rendering
- * @apiVersion 0.9.0
+ * @apiVersion v0
  * @apiName NewRender
  * @apiGroup Render
  *
@@ -614,6 +725,16 @@ func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, 
 				log.Println("[MASTER] request dispatched")
 			}
 			restEditResource(w, r, redisPool, matched[1], matched[2])
+			return
+		}
+	}
+
+	if matched := regexp.MustCompile("^/sessions/(.+)/resource$").FindStringSubmatch(path); matched != nil {
+		if r.Method == "PATCH" {
+			if verbose {
+				log.Println("[MASTER] patch request dispatched")
+			}
+			restPatchResource(w, r, redisPool, matched[1])
 			return
 		}
 	}
@@ -879,7 +1000,7 @@ func interactWithRedis(requestChan chan RenderRequest, waitingDuration chan time
 func startRestServer(redisPool *redis.Pool, waitingDuration chan time.Duration) {
 	requestChan := make(chan RenderRequest, 256)
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/v0/", func(w http.ResponseWriter, r *http.Request) {
 		restHandler(w, r, redisPool, waitingDuration, requestChan)
 	})
 
