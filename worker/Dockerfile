@@ -2,6 +2,7 @@ FROM centos
 
 MAINTAINER peryaudo, peryaudo@gmail.com
 
+RUN yum install -y docker.io
 RUN yum install -y tar git bzip2
 RUN cd /tmp && curl -O https://storage.googleapis.com/golang/go1.2.2.linux-amd64.tar.gz
 RUN cd /tmp && tar -C /usr/local -xzf go1.2.2.linux-amd64.tar.gz
