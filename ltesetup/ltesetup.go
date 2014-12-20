@@ -35,8 +35,7 @@ func AddInstance(config *InstConfig) error {
 		`--network=`+config.network,
 		`--external_ip_address=`+config.ipType,
 		`--service_account_scopes=https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/compute,https://www.googleapis.com/auth/devstorage.full_control`,
-		//`--image=https://www.googleapis.com/compute/v1/projects/gcp-samples/global/images/coreos-v282-0-0`,
-		`--image=projects/coreos-cloud/global/images/coreos-beta-324-5-0-v20140609`,
+		`--image=projects/coreos-cloud/global/images/coreos-stable-494-4-0-v20141204`,
 		`--metadata_from_file=user-data:`+config.cloudConfig,
 		`--boot_disk_size_gb=15`,
 		`--persistent_boot_disk=true`,
@@ -306,11 +305,10 @@ options:
 	err = CreateNetwork("lte-cluster")*/
 	case "create_master":
 		if flag.NArg() < 2 {
-			fmt.Fprintf(os.Stderr, "%s: too few arguments\n", os.Args[0])
-			flag.Usage()
-			os.Exit(1)
+			err = CreateMaster("lte-master", "")
+		} else {
+			err = CreateMaster("lte-master", flag.Args()[1])
 		}
-		err = CreateMaster("lte-master", flag.Args()[1])
 	case "delete_master":
 		err = DeleteInstance("lte-master")
 	case "update_images":
