@@ -12,6 +12,11 @@ write_files:
       sed 's/#\(SystemMaxUse=\).*/\164M/' -i /etc/systemd/journald.conf
       sed 's/#\(SystemMaxFileSize=\).*/\164M/' -i /etc/systemd/journald.conf
 
+  - path: /etc/systemd/system/docker.service.d/50-insecure-registry.conf
+    content: |
+        [Service]
+        Environment=DOCKER_OPTS='--insecure-registry="127.0.0.1:5001"'
+
 coreos:
   etcd:
     name: lte-master
