@@ -181,7 +181,7 @@ func createWorkerInstancesInternal(transport oauth.Transport, instanceName, mach
 	cloudConfig = strings.Replace(cloudConfig, "<redis_server>", redisServer, -1)
 	cloudConfig = strings.Replace(cloudConfig, "<logentries_token>", logentriesToken, -1)
 
-	if res, err := postRequest(`https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/`+zone+`/disks?sourceImage=https%3A%2F%2Fwww.googleapis.com%2Fcompute%2Fv1%2Fprojects%2Fgcp-samples%2Fglobal%2Fimages%2Fcoreos-v282-0-0`,
+	if res, err := postRequest(`https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/`+zone+`/disks?sourceImage=https%3A%2F%2Fwww.googleapis.com%2Fcompute%2Fv1%2Fprojects%2Fcoreos-cloud%2Fglobal%2Fimages%2Fcoreos-stable-494-5-0-v20141215`,
 		map[string]interface{}{
 			"zone":        "https://www.googleapis.com/compute/v1/projects/gcp-samples/zones/" + zone,
 			"name":        instanceName,

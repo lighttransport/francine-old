@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -692,8 +693,7 @@ func imin(x, y int) int {
 	}
 }
 
-func restHandler(w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, waitingDuration chan time.Duration, requestChan chan RenderRequest) {
-	path := r.URL.Path
+func restHandler(path string, w http.ResponseWriter, r *http.Request, redisPool *redis.Pool, waitingDuration chan time.Duration, requestChan chan RenderRequest) {
 
 	if verbose {
 		log.Println("[MASTER] rest request: " + path)
@@ -1001,7 +1001,7 @@ func startRestServer(redisPool *redis.Pool, waitingDuration chan time.Duration) 
 	requestChan := make(chan RenderRequest, 256)
 
 	http.HandleFunc("/v0/", func(w http.ResponseWriter, r *http.Request) {
-		restHandler(w, r, redisPool, waitingDuration, requestChan)
+		restHandler(strings.TrimPrefix(r.URL.Path, "/v0"), w, r, redisPool, waitingDuration, requestChan)
 	})
 
 	go interactWithRedis(requestChan, waitingDuration, redisPool)
